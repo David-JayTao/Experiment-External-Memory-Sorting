@@ -5,7 +5,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 add_executable(external_sort main.cpp src/run_file.cpp src/buffer.cpp
-  src/merge_plan.cpp src/projects.cpp src/loser_tree.cpp src/replacement.cpp tests/test_sort.cpp)
+  src/merge_plan.cpp src/projects.cpp src/loser_tree.cpp src/replacement.cpp
+  src/kway_merge.cpp tests/test_sort.cpp)
 target_include_directories(external_sort PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(external_sort PRIVATE Threads::Threads)
 if(MSVC)

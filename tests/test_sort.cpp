@@ -2,6 +2,7 @@
 #include "src/buffer.h"
 #include "src/projects.h"
 #include "src/loser_tree.h"
+#include "src/kway_merge.h"
 #include <algorithm>
 #include <limits>
 #include <random>
@@ -11,6 +12,41 @@
 
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+static void testBufferPool() {
+    RunFile::create("test_pool.bin", 4);
+    RunFile file("test_pool.bin");
+    std::vector<int> runs;
+    runs.push_back(file.put("low", {0, 1, 2, 3}));
+    runs.push_back(file.put("middle", {100, 101}));
+    runs.push_back(file.put("high", {200, 201}));
+    BufferPool pool(3, 1, file.scan());
+    IoStats stats;
+    pool.initialization(file, runs, stats);
+    require(pool.blockCount() == 6 && pool.freeCount() == 3, "2k input pool initialization");
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        require(pool.choosePrefetch() == 0, "smallest last-key policy");
+        int block = pool.reserve();
+        require(block >= 0, "prefetch allocation");
+        pool.readPrefetch(file, runs[0], 0, block, stats);
+        pool.finishPrefetch(0, block);
+    }
+    // lane0 此时拥有 4 个块，证明没有永久固定每路两个。
+    require(pool.freeCount() == 0, "shared pool use");
+    for (int expected = 0; expected < 4; ++expected) {
+        require(pool.front(0) == expected, "queued block ordering");
+        pool.consume(0);
+    }
+    pool.releaseConsumed();
+    require(pool.freeCount() == 4 && !pool.needsData(0), "release all consumed blocks");
+    require(pool.choosePrefetch() == 1, "finished run must not be prefetched");
+    const int recycled = pool.reserve();
+    require(recycled == 0, "released block should be reusable by another lane");
+    pool.readPrefetch(file, runs[1], 1, recycled, stats);
+    pool.finishPrefetch(1, recycled);
+    pool.consume(1);
+    require(pool.front(1) == 101, "cross-lane buffer reuse");
+    std::cout << "PASS dynamic pool: 2k blocks, argmin last-key, four blocks in one lane, cross-lane reuse\n";
 }
 // 测试层允许加载参考数组；正式 sortFile 不接收整个输入数组。
 static void checkSort(const std::vector<int32_t>& values, int project, size_t memorySize, size_t blockSize, size_t ways) {
@@ -66,6 +102,7 @@ void week3Demo() {
     require(file.search("C") == 2 && file.search("missing") == -1, "search failed");
 }
 void runTests() {
+    testBufferPool();
     week3Demo();
     RunFile::create("test_file.bin", 2);
     {
