@@ -1,6 +1,7 @@
 #include "test_sort.h"
 #include "src/buffer.h"
 #include "src/projects.h"
+#include "src/loser_tree.h"
 #include <algorithm>
 #include <limits>
 #include <random>
@@ -106,7 +107,12 @@ void runTests() {
         std::reverse(values.begin(), values.end());
         cases.push_back(values);
     }
-    for (size_t index = 0; index < cases.size(); ++index)
+    for (size_t index = 0; index < cases.size(); ++index) {
         checkSort(cases[index], 1, 23, 7, 3);
+        checkSort(cases[index], 2, 23, 7, 3);
+    }
+    for (size_t memorySize : {size_t(1), size_t(3), size_t(8)})
+        for (size_t blockSize : {size_t(1), size_t(5), size_t(17)})
+            checkSort({9, 1, 8, 2, 7, 3, 6, 4, 5, 0, -1, 3, 12, 2, 10}, 2, memorySize, blockSize, 3);
     std::cout << "PASS project1 " << cases.size() << " cases against std::sort\n";
 }

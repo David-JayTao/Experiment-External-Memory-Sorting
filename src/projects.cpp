@@ -1,4 +1,5 @@
 #include "projects.h"
+#include "replacement.h"
 #include <chrono>
 #include <limits>
 #include <stdexcept>
@@ -7,7 +8,7 @@
 SortResult sortFile(int project, const std::string& rawPath, const std::string& runPath,
                     size_t memorySize, size_t blockSize, size_t ways, std::ostream* trace) {
     (void)ways;
-    if (project != 1 || !memorySize || !blockSize || rawPath == runPath)
+    if ((project != 1 && project != 2) || !memorySize || !blockSize || rawPath == runPath)
         throw std::runtime_error("invalid sorting parameters");
     SortResult result;
     RawInput input(rawPath);
@@ -18,7 +19,9 @@ SortResult sortFile(int project, const std::string& rawPath, const std::string& 
     const auto start = std::chrono::steady_clock::now();
     RunFile::create(runPath, static_cast<uint32_t>(2 * maximumRuns + 1));
     RunFile file(runPath);
-    std::vector<int> runs = runGeneration(rawPath, file, memorySize, blockSize, result.io);
+    std::vector<int> runs;
+    if (project == 1) runs = runGeneration(rawPath, file, memorySize, blockSize, result.io);
+    else runs = replacementSelection(rawPath, file, memorySize, blockSize, result.io, trace);
     result.initialRuns = runs.size();
     if (trace) {
         for (size_t index = 0; index < runs.size(); ++index) {
@@ -35,6 +38,12 @@ SortResult sortFile(int project, const std::string& rawPath, const std::string& 
     }
     MergePlan plan = buildMergePlan(file, runs);
     result.ordinaryCost = plan.cost;
+    if (project == 2) {
+        plan = buildOptimalPlan(file, runs);
+        result.optimalCost = plan.cost;
+        if (trace) *trace << "fixed_chunk_runs=" << maximumRuns << " ordinary_cost=" << result.ordinaryCost
+                          << " optimal_cost=" << result.optimalCost << '\n';
+    }
     if (trace) printMergePlan(plan, *trace);
     result.finalRun = executeMergePlan(plan, plan.root, file, blockSize, result.io, trace);
     const auto end = std::chrono::steady_clock::now();
