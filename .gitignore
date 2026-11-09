@@ -1,0 +1,8 @@
+build*/
+.local/
+*.bin
+*.log
+*.pptx
+*.ppt
+*.mp3
+*.wav
