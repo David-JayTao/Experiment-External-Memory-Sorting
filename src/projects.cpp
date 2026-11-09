@@ -1,5 +1,6 @@
 #include "projects.h"
 #include "replacement.h"
+#include "kway_merge.h"
 #include <chrono>
 #include <limits>
 #include <stdexcept>
@@ -7,8 +8,7 @@
 // 外排序正式入口。只在测试/演示层使用整份数据的 std::sort 参考结果。
 SortResult sortFile(int project, const std::string& rawPath, const std::string& runPath,
                     size_t memorySize, size_t blockSize, size_t ways, std::ostream* trace) {
-    (void)ways;
-    if ((project != 1 && project != 2) || !memorySize || !blockSize || rawPath == runPath)
+    if (project < 1 || project > 3 || !memorySize || !blockSize || ways < 2 || rawPath == runPath)
         throw std::runtime_error("invalid sorting parameters");
     SortResult result;
     RawInput input(rawPath);
@@ -45,7 +45,8 @@ SortResult sortFile(int project, const std::string& rawPath, const std::string& 
                           << " optimal_cost=" << result.optimalCost << '\n';
     }
     if (trace) printMergePlan(plan, *trace);
-    result.finalRun = executeMergePlan(plan, plan.root, file, blockSize, result.io, trace);
+    if (project == 3) result.finalRun = mergeKRuns(file, runs, ways, blockSize, result.io, trace);
+    else result.finalRun = executeMergePlan(plan, plan.root, file, blockSize, result.io, trace);
     const auto end = std::chrono::steady_clock::now();
     result.milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
     return result;

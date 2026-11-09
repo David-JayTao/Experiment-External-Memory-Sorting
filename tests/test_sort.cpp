@@ -147,9 +147,13 @@ void runTests() {
     for (size_t index = 0; index < cases.size(); ++index) {
         checkSort(cases[index], 1, 23, 7, 3);
         checkSort(cases[index], 2, 23, 7, 3);
+        for (size_t ways : {size_t(2), size_t(3), size_t(4)})
+            checkSort(cases[index], 3, 23, 7, ways);
     }
     for (size_t memorySize : {size_t(1), size_t(3), size_t(8)})
         for (size_t blockSize : {size_t(1), size_t(5), size_t(17)})
-            checkSort({9, 1, 8, 2, 7, 3, 6, 4, 5, 0, -1, 3, 12, 2, 10}, 2, memorySize, blockSize, 3);
+            for (int project = 1; project <= 3; ++project)
+                checkSort({9, 1, 8, 2, 7, 3, 6, 4, 5, 0, -1, 3, 12, 2, 10}, project, memorySize, blockSize, 3);
     std::cout << "PASS project1 " << cases.size() << " cases against std::sort\n";
+    std::cout << "PASS project2/project3 with k=2,3,4 and memory/block boundary combinations\n";
 }
