@@ -1,11 +1,42 @@
 #include "test_sort.h"
 #include "src/buffer.h"
+#include "src/projects.h"
+#include <algorithm>
+#include <limits>
+#include <random>
 #include <iostream>
 #include <stdexcept>
 #include <cstdio>
 
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+// 测试层允许加载参考数组；正式 sortFile 不接收整个输入数组。
+static void checkSort(const std::vector<int32_t>& values, int project, size_t memorySize, size_t blockSize, size_t ways) {
+    writeRaw("test_input.bin", values);
+    SortResult result = sortFile(project, "test_input.bin", "test_runs.bin", memorySize, blockSize, ways);
+    std::vector<int32_t> expected = values, actual;
+    std::sort(expected.begin(), expected.end());
+    RunFile file("test_runs.bin", false);
+    if (result.finalRun >= 0) {
+        InputBuffer buffer(file, result.finalRun, blockSize);
+        int32_t value;
+        while (buffer.next(value)) actual.push_back(value);
+    }
+    require(actual.size() == values.size(), "element count changed");
+    require(std::is_sorted(actual.begin(), actual.end()), "output is not ordered");
+    require(actual == expected, "output multiset differs from std::sort");
+    // 每个中间归并段也必须有序。
+    for (size_t index = 0; index < file.scan().size(); ++index) {
+        InputBuffer buffer(file, static_cast<int>(index), blockSize);
+        int32_t value = 0, previous = 0;
+        bool first = true;
+        while (buffer.next(value)) {
+            require(first || previous <= value, "intermediate run is not ordered");
+            previous = value;
+            first = false;
+        }
+    }
 }
 void week3Demo() {
     RunFile::create("week3.bin", 8);
@@ -63,4 +94,19 @@ void runTests() {
     }
     std::remove("test_file.bin");
     std::cout << "PASS week3 file/buffer tests\n";
+    std::vector<std::vector<int32_t> > cases = {{}, {7}, {3, 2, 1}, {-1, -1, -1, 0, -2},
+        {std::numeric_limits<int32_t>::min(), 0, std::numeric_limits<int32_t>::max()}};
+    std::mt19937 random(20261109);
+    for (size_t count : {size_t(17), size_t(257), size_t(4099)}) {
+        std::vector<int32_t> values(count);
+        for (size_t index = 0; index < count; ++index) values[index] = int32_t(random() % 101) - 50;
+        cases.push_back(values);
+        std::sort(values.begin(), values.end());
+        cases.push_back(values);
+        std::reverse(values.begin(), values.end());
+        cases.push_back(values);
+    }
+    for (size_t index = 0; index < cases.size(); ++index)
+        checkSort(cases[index], 1, 23, 7, 3);
+    std::cout << "PASS project1 " << cases.size() << " cases against std::sort\n";
 }
