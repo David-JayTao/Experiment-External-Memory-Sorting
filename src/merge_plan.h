@@ -15,6 +15,7 @@ struct MergePlan {
 };
 std::vector<int> runGeneration(const std::string& rawPath, RunFile& file,
                                size_t memorySize, size_t blockSize, IoStats& stats);
+// 两种建树都只读目录，返回节点数组；不在建树时执行数据归并。
 MergePlan buildMergePlan(const RunFile& file, const std::vector<int>& runs);
 MergePlan buildOptimalPlan(const RunFile& file, const std::vector<int>& runs);
 int twoWayMerge(RunFile& file, int leftRun, int rightRun, size_t blockSize, IoStats& stats);

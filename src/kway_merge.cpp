@@ -126,33 +126,42 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
         }
         LoserTree tree(heads);
         std::exception_ptr errors[3];
-        std::thread inputThread([&]() {
-            try {
-                if (prefetchBlock >= 0) pool.readPrefetch(source, runs[lane], lane, prefetchBlock, stats);
-            } catch (...) { errors[0] = std::current_exception(); }
-        });
-        std::thread computeThread([&]() {
-            try {
-                if (missingHead) return; // 缺少一路的未知头值时，不能从其他路继续输出。
-                while (outputs[activeOutput].size() < blockSize && tree.winner() >= 0) {
-                    const int winner = tree.winner();
-                    outputs[activeOutput].push_back(tree.top().value);
-                    ++emitted;
-                    pool.consume(winner);
-                    Candidate next;
-                    if (pool.hasValue(winner)) {
-                        next.valid = true;
-                        next.value = pool.front(winner);
+        std::thread inputThread, computeThread, outputThread;
+        try {
+            inputThread = std::thread([&]() {
+                try {
+                    if (prefetchBlock >= 0) pool.readPrefetch(source, runs[lane], lane, prefetchBlock, stats);
+                } catch (...) { errors[0] = std::current_exception(); }
+            });
+            computeThread = std::thread([&]() {
+                try {
+                    if (missingHead) return; // 缺少一路的未知头值时，不能从其他路继续输出。
+                    while (outputs[activeOutput].size() < blockSize && tree.winner() >= 0) {
+                        const int winner = tree.winner();
+                        outputs[activeOutput].push_back(tree.top().value);
+                        ++emitted;
+                        pool.consume(winner);
+                        Candidate next;
+                        if (pool.hasValue(winner)) {
+                            next.valid = true;
+                            next.value = pool.front(winner);
+                        }
+                        tree.replaceWinner(next);
+                        if (pool.needsData(winner)) break;
                     }
-                    tree.replaceWinner(next);
-                    if (pool.needsData(winner)) break;
-                }
-            } catch (...) { errors[1] = std::current_exception(); }
-        });
-        std::thread outputThread([&]() {
-            try { file.writeBlock(outputs[writeOutput].data(), outputs[writeOutput].size(), &stats); }
-            catch (...) { errors[2] = std::current_exception(); }
-        });
+                } catch (...) { errors[1] = std::current_exception(); }
+            });
+            outputThread = std::thread([&]() {
+                try { file.writeBlock(outputs[writeOutput].data(), outputs[writeOutput].size(), &stats); }
+                catch (...) { errors[2] = std::current_exception(); }
+            });
+        } catch (...) {
+            // 若创建后续线程失败，先收回已启动线程，避免析构时 terminate。
+            if (inputThread.joinable()) inputThread.join();
+            if (computeThread.joinable()) computeThread.join();
+            if (outputThread.joinable()) outputThread.join();
+            throw;
+        }
         inputThread.join(); computeThread.join(); outputThread.join();
         for (int index = 0; index < 3; ++index) if (errors[index]) std::rethrow_exception(errors[index]);
         ++stats.stages;

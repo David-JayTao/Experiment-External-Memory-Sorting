@@ -7,13 +7,13 @@
 
 // 每个输出元素携带段号：一个块跨越段边界时，输出线程仍能正确更新目录。
 struct GeneratedBlock {
-    std::vector<int32_t> values;
-    std::vector<size_t> runNumbers;
+    std::vector<int32_t> values;    // 当前块的有效输出，不超过 B 个
+    std::vector<size_t> runNumbers; // 与 values 一一对应的生成段号
 };
 struct ReplacementInput {
-    std::vector<int32_t> values;
-    size_t count = 0;
-    size_t pos = 0;
+    std::vector<int32_t> values;    // 固定 B 个整数的物理输入块
+    size_t count = 0;              // 有效元素数量
+    size_t pos = 0;                // 计算线程下一次消费的位置
 };
 static void writeGeneratedBlock(const GeneratedBlock& block, RunFile& file,
                                 size_t& writtenRun, bool& runOpen,
@@ -59,6 +59,7 @@ std::vector<int> replacementSelection(const std::string& rawPath, RunFile& file,
         loaded += count;
     }
     LoserTree tree(candidates);
+    std::vector<Candidate>().swap(candidates); // 初始化副本不再占用候选空间
     if (trace) tree.print(*trace);
     inputs[0].count = source.readBlock(inputs[0].values.data(), blockSize, &stats);
     loaded += inputs[0].count;
@@ -75,41 +76,50 @@ std::vector<int> replacementSelection(const std::string& rawPath, RunFile& file,
         outputs[activeOutput].values.clear();
         outputs[activeOutput].runNumbers.clear();
         std::exception_ptr errors[3];
-        std::thread inputThread([&]() {
-            try {
-                if (readNeeded) inputs[spareInput].count = source.readBlock(inputs[spareInput].values.data(), blockSize, &stats);
-            } catch (...) { errors[0] = std::current_exception(); }
-        });
-        std::thread computeThread([&]() {
-            try {
-                ReplacementInput& input = inputs[activeInput];
-                GeneratedBlock& output = outputs[activeOutput];
-                while (output.values.size() < blockSize && tree.winner() >= 0) {
-                    if (input.pos == input.count && !noMoreAfterActive) break;
-                    if (tree.top().frozen) {
-                        ++currentRun;
-                        tree.thaw();
-                        if (trace) *trace << "thaw -> run " << currentRun << '\n';
+        std::thread inputThread, computeThread, outputThread;
+        try {
+            inputThread = std::thread([&]() {
+                try {
+                    if (readNeeded) inputs[spareInput].count = source.readBlock(inputs[spareInput].values.data(), blockSize, &stats);
+                } catch (...) { errors[0] = std::current_exception(); }
+            });
+            computeThread = std::thread([&]() {
+                try {
+                    ReplacementInput& input = inputs[activeInput];
+                    GeneratedBlock& output = outputs[activeOutput];
+                    while (output.values.size() < blockSize && tree.winner() >= 0) {
+                        if (input.pos == input.count && !noMoreAfterActive) break;
+                        if (tree.top().frozen) {
+                            ++currentRun;
+                            tree.thaw();
+                            if (trace) *trace << "thaw -> run " << currentRun << '\n';
+                        }
+                        const int32_t value = tree.top().value;
+                        output.values.push_back(value);
+                        output.runNumbers.push_back(currentRun);
+                        Candidate next;
+                        if (input.pos < input.count) {
+                            next.valid = true;
+                            next.value = input.values[input.pos++];
+                            next.frozen = next.value < value;
+                            if (trace && next.frozen) *trace << "freeze " << next.value << " < last=" << value << '\n';
+                        }
+                        tree.replaceWinner(next);
+                        if (trace && source.count() <= 100) tree.print(*trace);
                     }
-                    const int32_t value = tree.top().value;
-                    output.values.push_back(value);
-                    output.runNumbers.push_back(currentRun);
-                    Candidate next;
-                    if (input.pos < input.count) {
-                        next.valid = true;
-                        next.value = input.values[input.pos++];
-                        next.frozen = next.value < value;
-                        if (trace && next.frozen) *trace << "freeze " << next.value << " < last=" << value << '\n';
-                    }
-                    tree.replaceWinner(next);
-                    if (trace && source.count() <= 100) tree.print(*trace);
-                }
-            } catch (...) { errors[1] = std::current_exception(); }
-        });
-        std::thread outputThread([&]() {
-            try { writeGeneratedBlock(outputs[writeOutput], file, writtenRun, runOpen, runs, stats); }
-            catch (...) { errors[2] = std::current_exception(); }
-        });
+                } catch (...) { errors[1] = std::current_exception(); }
+            });
+            outputThread = std::thread([&]() {
+                try { writeGeneratedBlock(outputs[writeOutput], file, writtenRun, runOpen, runs, stats); }
+                catch (...) { errors[2] = std::current_exception(); }
+            });
+        } catch (...) {
+            // 若创建后续线程失败，先收回已启动线程，避免析构时 terminate。
+            if (inputThread.joinable()) inputThread.join();
+            if (computeThread.joinable()) computeThread.join();
+            if (outputThread.joinable()) outputThread.join();
+            throw;
+        }
         inputThread.join(); computeThread.join(); outputThread.join();
         for (int index = 0; index < 3; ++index) if (errors[index]) std::rethrow_exception(errors[index]);
         ++stats.stages;

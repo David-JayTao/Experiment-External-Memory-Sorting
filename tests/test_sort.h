@@ -2,4 +2,5 @@
 #define TEST_SORT_H
 void week3Demo();
 void runTests();
+void runBenchmarks();
 #endif

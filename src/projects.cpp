@@ -14,7 +14,7 @@ SortResult sortFile(int project, const std::string& rawPath, const std::string& 
     RawInput input(rawPath);
     result.inputCount = input.count();
     const uint64_t maximumRuns = input.count() / memorySize + (input.count() % memorySize != 0);
-    if (maximumRuns > (std::numeric_limits<uint32_t>::max() - 1) / 2)
+    if (maximumRuns > uint64_t((std::numeric_limits<int>::max() - 1) / 2))
         throw std::runtime_error("too many runs for this directory format");
     const auto start = std::chrono::steady_clock::now();
     RunFile::create(runPath, static_cast<uint32_t>(2 * maximumRuns + 1));
@@ -44,7 +44,7 @@ SortResult sortFile(int project, const std::string& rawPath, const std::string& 
         if (trace) *trace << "fixed_chunk_runs=" << maximumRuns << " ordinary_cost=" << result.ordinaryCost
                           << " optimal_cost=" << result.optimalCost << '\n';
     }
-    if (trace) printMergePlan(plan, *trace);
+    if (trace && project != 3) printMergePlan(plan, *trace);
     if (project == 3) result.finalRun = mergeKRuns(file, runs, ways, blockSize, result.io, trace);
     else result.finalRun = executeMergePlan(plan, plan.root, file, blockSize, result.io, trace);
     const auto end = std::chrono::steady_clock::now();

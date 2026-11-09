@@ -1,7 +1,10 @@
 #include "loser_tree.h"
 #include <stdexcept>
+#include <limits>
 #include <utility>
 LoserTree::LoserTree(const std::vector<Candidate>& candidates) : leafCount_(1), champion_(0) {
+    if (candidates.size() > size_t(std::numeric_limits<int>::max() / 2))
+        throw std::runtime_error("too many loser-tree leaves");
     while (size_t(leafCount_) < candidates.size()) leafCount_ *= 2;
     leaves_ = candidates;
     leaves_.resize(leafCount_);
