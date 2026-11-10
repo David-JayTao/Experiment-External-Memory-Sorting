@@ -1,0 +1,163 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "验收：Week 3 文件与缓冲区",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "week3"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 1 二路外排序",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project1"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 2 置换选择",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project2"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 3 K 路归并（k=3）",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project3",
+        "--k",
+        "3"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 3（k=2）",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project3",
+        "--k",
+        "2"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 3（k=4）",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project3",
+        "--k",
+        "4"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Project 3 大规模测试",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "project3",
+        "--size",
+        "50003",
+        "--memory",
+        "256",
+        "--block",
+        "64",
+        "--k",
+        "4"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Week 8 全部测试",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "test"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    },
+    {
+      "name": "验收：Benchmark",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/windows/Debug/external_sort.exe",
+      "args": [
+        "--workdir",
+        "${workspaceFolder}/build/windows/run/Debug",
+        "benchmark"
+      ],
+      "cwd": "${workspaceFolder}/build/windows/run/Debug",
+      "stopAtEntry": false,
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "构建：Windows Debug"
+    }
+  ]
+}

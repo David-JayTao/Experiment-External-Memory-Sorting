@@ -8,6 +8,9 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 // 严格解析非负整数，避免负数被转换成巨大的无符号容量。
 static size_t number(const char* text) {
     if (!text[0]) throw std::runtime_error("empty numeric option");
@@ -20,6 +23,9 @@ static size_t number(const char* text) {
     return static_cast<size_t>(value);
 }
 static void usage() {
+#ifdef _WIN32
+    std::cout << "Windows optional prefix: external_sort --workdir DIRECTORY MODE [options]\n";
+#endif
     std::cout << "external_sort week3 | test | benchmark\n"
               << "external_sort project1|project2|project3 [--memory M] [--block B] [--k K] [--trace]\n"
               << "  [--size N | --input raw.bin] [--output runs.bin]\n"
@@ -30,6 +36,16 @@ static void usage() {
 }
 int main(int argc, char** argv) {
     try {
+#ifdef _WIN32
+        // C/C++ 1.35 的 Ctrl+F5 复用终端时不更新 cwd/环境变量。
+        // Windows 验收配置显式传此前缀，保证数据位置；普通命令不受影响。
+        if (argc > 1 && std::string(argv[1]) == "--workdir") {
+            if (argc < 4) throw std::runtime_error("--workdir needs a directory and mode");
+            if (_chdir(argv[2]) != 0) throw std::runtime_error("cannot enter --workdir directory");
+            argc -= 2;
+            argv += 2; // 跳过目录前缀，让原有模式解析继续使用 argv[1]。
+        }
+#endif
         const std::string mode = argc > 1 ? argv[1] : "help";
         if (mode == "help" || mode == "--help") { usage(); return 0; }
         if (mode == "week3" || mode == "test" || mode == "benchmark") {
