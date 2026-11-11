@@ -3,10 +3,11 @@
 #include "run_file.h"
 #include <queue>
 #include <ostream>
+// 共享池的一个物理块：整数数组及有效范围，不固定归属于某一路。
 struct InputBlock {
-    std::vector<int32_t> values;
-    size_t count = 0;
-    size_t pos = 0;
+    std::vector<int32_t> values; // 固定B容量的数据区
+    size_t count = 0; // 本块有效整数数，尾块可小于B
+    size_t pos = 0; // 下一个待消费位置
 };
 // 固定 2k 个物理块，逻辑上按路排队；块没有永久所属路。
 class BufferPool {
@@ -36,11 +37,13 @@ private:
     std::queue<int> free_;          // 仅主线程在同步点改动
     std::vector<int> released_;     // 计算线程记下已耗尽块，同步后归还
     std::vector<uint64_t> next_;    // 每路已读入的元素数，主线程更新
-    std::vector<uint64_t> lengths_;
+    std::vector<uint64_t> lengths_; // 每条输入路的总元素数，用于判断真正读完
     std::vector<int32_t> lastKeys_; // 每路最后一个已读关键字，预取依据
 };
+// 合并一组至多ways段并返回结果目录下标；双输出配合三线程阶段同步。
 int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
               size_t blockSize, IoStats& stats, std::ostream* trace = 0);
+// 多轮分组K路归并；返回最终段号，空输入返回-1。
 int mergeKRuns(RunFile& file, std::vector<int> runs, size_t ways,
                size_t blockSize, IoStats& stats, std::ostream* trace = 0);
 #endif

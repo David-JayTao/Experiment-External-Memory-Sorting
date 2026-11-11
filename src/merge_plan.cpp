@@ -5,6 +5,7 @@
 #include <functional>
 
 // memorySize 是本次内排的元素上限；输出继续复用 Week 3 缓冲区。
+// 从rawPath每次取至多M个整数内排，按B输出；返回初始段目录下标序列。
 std::vector<int> runGeneration(const std::string& rawPath, RunFile& file,
                                size_t memorySize, size_t blockSize, IoStats& stats) {
     if (!memorySize || !blockSize) throw std::runtime_error("memory and block sizes must be positive");
@@ -30,6 +31,7 @@ std::vector<int> runGeneration(const std::string& rawPath, RunFile& file,
     return runs;
 }
 // 普通计划：每轮相邻配对；奇数个节点时最后一个直接进入下一轮。
+// 输入段号对应计划叶子；返回普通二叉计划，空输入root=-1。
 MergePlan buildMergePlan(const RunFile& file, const std::vector<int>& runs) {
     MergePlan plan;
     std::vector<int> level;
@@ -58,6 +60,8 @@ MergePlan buildMergePlan(const RunFile& file, const std::vector<int>& runs) {
     return plan;
 }
 // 两路归并只保留两个输入块、一个输出块，以及两个当前值。
+// 合并leftRun/rightRun两个已排序段，返回新段目录下标。
+// 两路相等时先取左路；一方耗尽后顺序排空另一方。
 int twoWayMerge(RunFile& file, int leftRun, int rightRun, size_t blockSize, IoStats& stats) {
     InputBuffer left(file, leftRun, blockSize, &stats);
     InputBuffer right(file, rightRun, blockSize, &stats);
@@ -79,6 +83,7 @@ int twoWayMerge(RunFile& file, int leftRun, int rightRun, size_t blockSize, IoSt
     return file.endRun();
 }
 // 后序执行：叶子已有数据；内部节点等两个孩子完成后再归并。
+// 执行nodeIndex子树并缓存结果段号；空树返回-1，已有结果直接复用。
 int executeMergePlan(MergePlan& plan, int nodeIndex, RunFile& file,
                      size_t blockSize, IoStats& stats, std::ostream* trace) {
     if (nodeIndex == -1) return -1;
@@ -91,6 +96,7 @@ int executeMergePlan(MergePlan& plan, int nodeIndex, RunFile& file,
                       << " -> " << file.run(node.runIndex).name << " length=" << node.length << '\n';
     return node.runIndex;
 }
+// 打印节点、孩子和理论加权长度cost，帮助核对计划与执行顺序。
 void printMergePlan(const MergePlan& plan, std::ostream& output) {
     for (size_t index = 0; index < plan.nodes.size(); ++index) {
         const MergeNode& node = plan.nodes[index];
@@ -102,6 +108,8 @@ void printMergePlan(const MergePlan& plan, std::ostream& output) {
     output << "root=" << plan.root << " theoretical_cost=" << plan.cost << '\n';
 }
 // 哈夫曼思想：每次取两个最短段，最小化所有归并输出长度之和。
+// 以段长为权构造最优二叉归并树；等长时按节点下标确定顺序。
+// cost是元素搬移权重，不是含尾块取整和目录访问的实际I/O次数。
 MergePlan buildOptimalPlan(const RunFile& file, const std::vector<int>& runs) {
     MergePlan plan;
     typedef std::pair<uint64_t, int> Item;

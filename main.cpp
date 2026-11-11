@@ -22,6 +22,7 @@ static size_t number(const char* text) {
     if (errno || *end || value > std::numeric_limits<size_t>::max()) throw std::runtime_error("numeric option out of range");
     return static_cast<size_t>(value);
 }
+// 显示统一命令行入口及输入格式；帮助模式不创建数据文件。
 static void usage() {
 #ifdef _WIN32
     std::cout << "Windows optional prefix: external_sort --workdir DIRECTORY MODE [options]\n";
@@ -34,6 +35,8 @@ static void usage() {
               << "--input: raw native-endian int32 file; streaming count/order verification.\n"
               << "Output is Header+Directory+Data. M/B are element counts, K >= 2.\n";
 }
+// 解析模式和容量参数，调用演示、测试或 sortFile。
+// 正常退出返回0；参数、文件或验证错误统一报告并返回1。
 int main(int argc, char** argv) {
     try {
 #ifdef _WIN32
@@ -57,6 +60,7 @@ int main(int argc, char** argv) {
         }
         if (mode != "project1" && mode != "project2" && mode != "project3")
             throw std::runtime_error("unknown mode; run external_sort --help");
+        // M、B以整数个数计；默认15个数用于课堂逐步观察。
         size_t memorySize = 4, blockSize = 3, ways = 3, count = 15;
         bool generatedSize = false, trace = false;
         std::string inputPath, outputPath = mode + "_runs.bin";
@@ -74,6 +78,7 @@ int main(int argc, char** argv) {
         }
         if (generatedSize && !inputPath.empty()) throw std::runtime_error("choose --size or --input");
         if (!memorySize || !blockSize || ways < 2) throw std::runtime_error("M/B must be positive and K >= 2");
+        // 自动生成数据可保留参考数组；自定义文件仅做流式数量和有序性验证。
         const bool exactCheck = inputPath.empty();
         std::vector<int32_t> expected;
         if (exactCheck) {
@@ -94,6 +99,7 @@ int main(int argc, char** argv) {
                 std::cout << '\n';
             }
         }
+        // 正式算法只接收文件路径；生成参考数据与最终验证均在算法计时之外。
         SortResult result = sortFile(mode[7] - '0', inputPath, outputPath, memorySize, blockSize, ways, trace ? &std::cout : 0);
         if (exactCheck) std::sort(expected.begin(), expected.end());
         RunFile file(outputPath, false);
@@ -113,6 +119,7 @@ int main(int argc, char** argv) {
             }
             if (trace && result.inputCount <= 100) std::cout << '\n';
         }
+        // 数量相同且逐项等于std::sort，才能证明未丢失或重复数据。
         if (checked != result.inputCount) throw std::runtime_error("output count changed");
         std::cout << (exactCheck ? "PASS std::sort exact comparison\n" : "PASS streaming count/order check (not an exact multiset comparison)\n");
         printResult(result, std::cout);

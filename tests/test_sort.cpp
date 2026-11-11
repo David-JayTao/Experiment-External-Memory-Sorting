@@ -10,9 +10,11 @@
 #include <stdexcept>
 #include <cstdio>
 
+// 测试断言失败即抛异常，由main报告并返回非零，避免只打印失败却误判成功。
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+// 构造三路相距较大的键值，验证最小末值预取、一路占四块和跨路复用。
 static void testBufferPool() {
     RunFile::create("test_pool.bin", 4);
     RunFile file("test_pool.bin");
@@ -49,6 +51,8 @@ static void testBufferPool() {
     std::cout << "PASS dynamic pool: 2k blocks, argmin last-key, four blocks in one lane, cross-lane reuse\n";
 }
 // 测试层允许加载参考数组；正式 sortFile 不接收整个输入数组。
+// 写入values后运行指定项目，逐项对照std::sort；同时检查所有中间段有序。
+// M/B/k由调用者组合；返回真实排序指标，验证读取不计入算法I/O。
 static SortResult checkSort(const std::vector<int32_t>& values, int project, size_t memorySize, size_t blockSize, size_t ways) {
     writeRaw("test_input.bin", values);
     SortResult result = sortFile(project, "test_input.bin", "test_runs.bin", memorySize, blockSize, ways);
@@ -76,6 +80,7 @@ static SortResult checkSort(const std::vector<int32_t>& values, int project, siz
     }
     return result;
 }
+// 独立核对败者重赛/冻结/EOF、最优计划代价、空路及非法文件与目录访问。
 static void testMechanisms() {
     std::vector<Candidate> leaves(5);
     const int32_t values[] = {4, 3, 6, 8, 1};
@@ -130,6 +135,7 @@ static void testMechanisms() {
     require(rejected, "truncated header accepted");
     std::cout << "PASS loser replay/freeze/EOF, Huffman cost, empty K lanes, invalid files/ranges/names\n";
 }
+// 创建A/B/C不等长段，关闭后重开，展示物理偏移、Scan、Search及尾块输出。
 void week3Demo() {
     RunFile::create("week3.bin", 8);
     {
@@ -156,6 +162,7 @@ void week3Demo() {
     std::cout << "Search C=" << file.search("C") << " missing=" << file.search("missing") << '\n';
     require(file.search("C") == 2 && file.search("missing") == -1, "search failed");
 }
+// 先验证局部机制，再做220次端到端精确排序；固定种子便于复现。
 void runTests() {
     testMechanisms();
     testBufferPool();
@@ -188,6 +195,7 @@ void runTests() {
     }
     std::remove("test_file.bin");
     std::cout << "PASS week3 file/buffer tests\n";
+    // 边界集覆盖空、单元素、逆序、重复、负数及int32最小/最大值。
     std::vector<std::vector<int32_t> > cases = {{}, {7}, {3, 2, 1}, {-1, -1, -1, 0, -2},
         {std::numeric_limits<int32_t>::min(), 0, std::numeric_limits<int32_t>::max()}};
     std::mt19937 random(20261109);
@@ -200,18 +208,21 @@ void runTests() {
         std::reverse(values.begin(), values.end());
         cases.push_back(values);
     }
+    // 14组数据各测P1/P2及P3的k=2/3/4，共70次。
     for (size_t index = 0; index < cases.size(); ++index) {
         checkSort(cases[index], 1, 23, 7, 3);
         checkSort(cases[index], 2, 23, 7, 3);
         for (size_t ways : {size_t(2), size_t(3), size_t(4)})
             checkSort(cases[index], 3, 23, 7, ways);
     }
+    // M与B的9种组合跨3个项目，共27次，包含M<B和单元素容量。
     for (size_t memorySize : {size_t(1), size_t(3), size_t(8)})
         for (size_t blockSize : {size_t(1), size_t(5), size_t(17)})
             for (int project = 1; project <= 3; ++project)
                 checkSort({9, 1, 8, 2, 7, 3, 6, 4, 5, 0, -1, 3, 12, 2, 10}, project, memorySize, blockSize, 3);
     std::cout << "PASS project1 " << cases.size() << " cases against std::sort\n";
     std::cout << "PASS project2/project3 with k=2,3,4 and memory/block boundary combinations\n";
+    // 40个独立随机种子各测3项目，共120次；加上最后3次大输入，总计220。
     for (unsigned seed = 0; seed < 40; ++seed) {
         std::mt19937 randomCase(seed);
         std::vector<int32_t> values(randomCase() % 100);
@@ -226,6 +237,8 @@ void runTests() {
 }
 
 // CSV 时间只覆盖 sortFile；数据生成、std::sort、逐个中间段检查不计时。
+// 四个N各运行三个项目输出12行CSV，M=256、B=64、k=4。
+// 每个规模重新初始化同一随机种子，各项目使用同一份输入；时间是单次测量。
 void runBenchmarks() {
     std::cout << "project,n,memory,block,k,runs,merges,rounds,reads,writes,stages,ms,exact\n";
     for (size_t count : {size_t(31), size_t(257), size_t(4099), size_t(50003)}) {

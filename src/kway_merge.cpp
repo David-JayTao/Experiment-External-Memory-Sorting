@@ -5,6 +5,7 @@
 #include <thread>
 #include <stdexcept>
 
+// 按配置k分配2k个B容量物理块；逻辑队列数为本组实际段数（可小于k）。
 BufferPool::BufferPool(size_t ways, size_t blockSize, const std::vector<RunInfo>& runs)
     : blocks_(2 * ways), queues_(runs.size()), next_(runs.size(), 0),
       lengths_(runs.size()), lastKeys_(runs.size(), 0) {
@@ -15,6 +16,7 @@ BufferPool::BufferPool(size_t ways, size_t blockSize, const std::vector<RunInfo>
     }
     for (size_t lane = 0; lane < runs.size(); ++lane) lengths_[lane] = runs[lane].count;
 }
+// 每条非空路先填一块，建立可比较的头值；空段不占块。
 void BufferPool::initialization(RunFile& source, const std::vector<int>& runs, IoStats& stats) {
     for (size_t lane = 0; lane < runs.size(); ++lane) {
         if (lengths_[lane] == 0) continue;
@@ -23,6 +25,8 @@ void BufferPool::initialization(RunFile& source, const std::vector<int>& runs, I
         finishPrefetch(static_cast<int>(lane), block);
     }
 }
+// 只考虑尚未读完的路；空队列优先，否则取lastKeys最小路，平局取先者。
+// 返回路号而非块号；返回-1表示所有数据已读入，不代表所有数据已输出。
 int BufferPool::choosePrefetch() const {
     int target = -1;
     for (size_t lane = 0; lane < queues_.size(); ++lane) {
@@ -33,30 +37,37 @@ int BufferPool::choosePrefetch() const {
     }
     return target;
 }
+// 从共享空闲队列取出物理块号；无空闲块返回-1，预取本阶段不启动。
 int BufferPool::reserve() {
     if (free_.empty()) return -1;
     const int block = free_.front();
     free_.pop();
     return block;
 }
+// 输入线程向预留块读取该路下一段数据；此时不改逻辑队列和next_。
 void BufferPool::readPrefetch(RunFile& source, int runIndex, int lane, int block, IoStats& stats) {
     InputBlock& input = blocks_.at(static_cast<size_t>(block));
     input.pos = 0;
     input.count = source.readBlock(runIndex, next_.at(static_cast<size_t>(lane)), input.values.data(), input.values.size(), &stats);
     if (!input.count) throw std::runtime_error("unexpected empty prefetch");
 }
+// join后发布已读块：入该路队列，推进已读数量，记录块末关键字。
 void BufferPool::finishPrefetch(int lane, int block) {
     const InputBlock& input = blocks_[block];
     queues_[lane].push(block);
     next_[lane] += input.count;
     lastKeys_[lane] = input.values[input.count - 1];
 }
+// 队列非空表示存在已公开且尚未消费的头值。
 bool BufferPool::hasValue(int lane) const { return !queues_.at(static_cast<size_t>(lane)).empty(); }
+// 队列为空且磁盘仍有未读值，表示头值未知，计算必须等待补块。
 bool BufferPool::needsData(int lane) const { return !hasValue(lane) && next_[lane] < lengths_[lane]; }
+// 取路队首块的当前整数；调用前必须确认hasValue。
 int32_t BufferPool::front(int lane) const {
     const InputBlock& input = blocks_.at(static_cast<size_t>(queues_.at(static_cast<size_t>(lane)).front()));
     return input.values[input.pos];
 }
+// 计算线程消费一个值；块耗尽则出队并登记，暂不放回空闲池。
 void BufferPool::consume(int lane) {
     const int block = queues_[lane].front();
     InputBlock& input = blocks_[block];
@@ -65,6 +76,7 @@ void BufferPool::consume(int lane) {
         released_.push_back(block);
     }
 }
+// 主线程在join后归还耗尽块，使它们下一阶段可服务任意一路。
 void BufferPool::releaseConsumed() {
     for (size_t index = 0; index < released_.size(); ++index) {
         blocks_[released_[index]].pos = blocks_[released_[index]].count = 0;
@@ -72,6 +84,7 @@ void BufferPool::releaseConsumed() {
     }
     released_.clear();
 }
+// 只在同步点打印队列、块位置及lastKeys；复制队列避免破坏原顺序。
 void BufferPool::print(std::ostream& output) const {
     output << "pool free=" << free_.size() << '/' << blocks_.size();
     for (size_t lane = 0; lane < queues_.size(); ++lane) {
@@ -87,6 +100,8 @@ void BufferPool::print(std::ostream& output) const {
 }
 
 // 合并这一组最多 k 个段，输出线程用 file，输入线程用独立 source 文件流。
+// 合并runs中的一组有序段，返回新增结果段号；ways限定最多路数。
+// 双输出块交替，输入池共享；独立读写文件流避免并发修改同一fstream。
 int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
               size_t blockSize, IoStats& stats, std::ostream* trace) {
     if (runs.empty() || ways < 2 || runs.size() > ways || !blockSize)
@@ -115,6 +130,7 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
             *trace << "prefetch lane=" << lane << " block=" << prefetchBlock
                    << " computeOutput=" << activeOutput << " writeOutput=" << writeOutput << '\n';
         }
+        // 每阶段从已公开队首重建k叶败者树；缺少未知头值时本阶段只补数据。
         std::vector<Candidate> heads(runs.size());
         bool missingHead = false;
         for (size_t index = 0; index < runs.size(); ++index) {
@@ -124,15 +140,18 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
                 heads[index].value = pool.front(static_cast<int>(index));
             }
         }
+        // 此实现每阶段建树O(k)，阶段内替换冠军O(log k)，复杂度需计入两者。
         LoserTree tree(heads);
         std::exception_ptr errors[3];
         std::thread inputThread, computeThread, outputThread;
         try {
+            // 预取只写被reserve隔离的块，尚未入队，计算线程不能看见它。
             inputThread = std::thread([&]() {
                 try {
                     if (prefetchBlock >= 0) pool.readPrefetch(source, runs[lane], lane, prefetchBlock, stats);
                 } catch (...) { errors[0] = std::current_exception(); }
             });
+            // 计算独占活动输出与消费位置；胜出路补上新头后沿败者树路径更新。
             computeThread = std::thread([&]() {
                 try {
                     if (missingHead) return; // 缺少一路的未知头值时，不能从其他路继续输出。
@@ -151,6 +170,7 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
                     }
                 } catch (...) { errors[1] = std::current_exception(); }
             });
+            // 输出线程写上一阶段完成的块，不能读取本阶段正在生成的块。
             outputThread = std::thread([&]() {
                 try { file.writeBlock(outputs[writeOutput].data(), outputs[writeOutput].size(), &stats); }
                 catch (...) { errors[2] = std::current_exception(); }
@@ -162,6 +182,7 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
             if (outputThread.joinable()) outputThread.join();
             throw;
         }
+        // 三个任务结束才回收、公开预取块和切换输出；消除阶段间读写冲突。
         inputThread.join(); computeThread.join(); outputThread.join();
         for (int index = 0; index < 3; ++index) if (errors[index]) std::rethrow_exception(errors[index]);
         ++stats.stages;
@@ -177,6 +198,8 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
 }
 
 // 一轮按组归并，每组是真正的 K 路选择；余下单段直接带入下一轮。
+// 反复按至多k段分组，返回唯一最终段；空输入返回-1。
+// 每轮段数缩为ceil(R/k)，余下单段直接携带，不执行额外数据复制。
 int mergeKRuns(RunFile& file, std::vector<int> runs, size_t ways,
                size_t blockSize, IoStats& stats, std::ostream* trace) {
     if (ways < 2 || !blockSize) throw std::runtime_error("k must be at least two");
