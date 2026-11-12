@@ -1,0 +1,80 @@
+% 使用 XeLaTeX 编译；所有章节及源码均为 UTF-8。
+\documentclass[UTF8,a4paper,zihao=-4,oneside,fontset=fandol]{ctexrep}
+\usepackage[margin=24mm,headheight=15pt]{geometry}
+\usepackage{fontspec}
+\setmonofont{Consolas}[Scale=0.88]
+\usepackage{amsmath,amssymb,booktabs,longtable,tabularx,array}
+\usepackage{graphicx,xcolor,tikz,float,caption,fvextra,fancyhdr,enumitem,needspace}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc}
+\definecolor{ink}{HTML}{163B54}
+\definecolor{pale}{HTML}{EDF3F6}
+\definecolor{accent}{HTML}{2B7185}
+\usepackage{xurl}
+\usepackage[unicode,colorlinks,linkcolor=ink,urlcolor=accent,bookmarksnumbered]{hyperref}
+\hypersetup{pdftitle={数据结构与算法专题实践：外存数据管理与归并排序实验报告},pdfauthor={刘酝潇}}
+\ctexset{chapter={format=\Large\bfseries\color{ink},beforeskip=2pt,afterskip=18pt},section={format=\large\bfseries\color{ink}},subsection={format=\normalsize\bfseries}}
+\setlength{\parskip}{3pt}
+\linespread{1.23}
+\setlist{nosep,leftmargin=2em,topsep=5pt}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\arraystretch}{1.23}
+\captionsetup{font=small,labelfont=bf,skip=7pt}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small 外存数据管理与归并排序}
+\fancyhead[R]{\small 课程实验报告}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\code}[1]{\nolinkurl{#1}}
+\newcommand{\src}[1]{\code{#1}}
+\newcommand{\shot}[4]{\begin{figure}[H]\centering\includegraphics[width=\linewidth,trim=#4,clip]{figures/#1}\caption{#2}\label{#3}\end{figure}}
+\tikzset{box/.style={draw=accent,rounded corners=2pt,fill=pale,align=center,font=\small,minimum height=10mm,text width=32mm},flow/.style={-{Stealth[length=2mm]},thick,draw=accent}}
+\fvset{fontsize=\fontsize{8.6}{11}\selectfont,breaklines=true,breakanywhere=true,numbers=left,numbersep=7pt,xleftmargin=6mm,tabsize=4,frame=lines,framesep=3mm,rulecolor=\color{black!20},samepage=false}
+\begin{document}
+\begin{titlepage}\thispagestyle{empty}
+\vspace*{12mm}
+\begin{center}
+{\zihao{1}\bfseries 东南大学}\par\vspace{12mm}
+{\Large 数据结构与算法专题实践}\par\vspace{5mm}
+{\color{accent}\rule{0.88\linewidth}{1.2pt}}\par\vspace{15mm}
+{\zihao{2}\bfseries 外存数据管理与归并排序}\par\vspace{7mm}
+{\zihao{2}\bfseries 实验报告}\par\vspace{10mm}
+{\large Project 1\quad /\quad Project 2\quad /\quad Project 3}\par\vspace{24mm}
+\begin{tabular}{rl}
+学生姓名：& 刘酝潇\\[8pt]
+学\hspace{2em}号：& 09024211\\[8pt]
+课\hspace{2em}程：& 数据结构与算法专题实践\\[8pt]
+实验主题：& 外存数据管理与归并排序\\[8pt]
+实现语言：& C++11\\[8pt]
+实验环境：& Windows 原生 MSVC / WSL2 GCC
+\end{tabular}
+\vfill {\large 2026 年 11 月}\par\vspace{8mm}
+{\small 本报告采用自主排版，不代表学校官方模板。}
+\end{center}\end{titlepage}
+\pagenumbering{Roman}
+\chapter*{摘要}\addcontentsline{toc}{chapter}{摘要}
+本实验围绕有限工作内存条件下的整数外排序，完成从二进制文件组织到多路归并的连续工程实践。文件采用固定大小文件头、预留目录和顺序数据区，多个不等长有序段共存于同一文件。输入与输出缓冲将逐元素比较转换为分块读写，使算法不必持有完整数据。
+
+Project 1以固定容量分块内排生成初始段，建立普通二叉归并计划并后序执行。Project 2用真正保存内部败者的败者树实现置换选择，通过冻结与解冻生成长段；输入、计算和输出采用双缓冲与三个线程的阶段同步，并以哈夫曼方法选择二路归并顺序。Project 3复用置换选择，在归并阶段维护共享的$2k$输入块、每路队列和空闲池，按最后已读关键字调度预取，完成真正的K路选择和多轮归并。
+
+最终代码在Windows原生Debug和Release环境完成完整验收，测试包含220次与\code{std::sort}完整结果的精确比较、机制与非法输入检查以及6项CTest。真实实验中，$N=50003,M=256,B=64,k=4$时，初始段由196减为99，Project 3的数据块读写调用总数为7970，少于Project 1的13964；但在本次小块、可缓存的数据规模下，阶段线程创建和同步使并行方案耗时更高。报告区分理论搬移代价、应用层块调用和实际计时，说明这些结果的条件与边界。
+
+本文按问题需求、系统结构、模块设计、测试分析、实验总结和完整源码六部分组织。运行截图来自Windows实际程序，性能图由保存的CSV生成；最后附全部17个正式C++文件及构建配置，源码快照与已验收提交对应。
+
+\noindent\textbf{关键词：}外存排序；归并段；败者树；置换选择；动态缓冲；阶段同步
+\tableofcontents\clearpage
+\pagenumbering{arabic}
+\input{chapters/01-requirements}
+\input{chapters/02-architecture}
+\input{chapters/03-design}
+\input{chapters/04-results}
+\input{chapters/05-summary}
+\chapter{完整源代码}\label{chap:source}
+本章由脚本直接读取最终仓库文件生成，包含\code{main.cpp}、\code{src/}和\code{tests/}下全部正式C++头文件与实现文件，不以截图或省略号替代代码。每个文件保留完整中文注释、缩进和行号；较长语句按版心换行，行号仍按源码原始行计算。
+
+\input{code_appendix/version}
+
+快照文件及SHA-256摘要保存在\code{code_appendix/manifest.json}。\code{scripts/snapshot_code.py}检查工作区与提交一致后复制源码，\code{scripts/verify_report.py}检查所有快照；普通重新编译不刷新快照，以保证报告的可复现性。
+\input{code_appendix/listings}
+\end{document}

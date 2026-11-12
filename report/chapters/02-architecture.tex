@@ -1,0 +1,63 @@
+\chapter{系统结构与算法思想}
+\section{统一工程与分层关系}
+工程只有一个\code{main.cpp}和一个可执行程序。命令行负责模式分派与验证，\code{sortFile}负责连接算法，文件层负责存储；败者树只处理候选，不依赖磁盘。图\ref{fig:architecture}概括这些调用关系。这种分层让三个项目共享底层机制，也便于独立检查某一层的错误。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 8mm]
+\node[box,text width=125mm] (main) {main：参数解析、输入准备、结果验证};
+\node[box,text width=125mm,below=of main] (sort) {sortFile：参数检查、目录预算、算法选择、统计计时};
+\node[box,below=of sort] (p2) {Project 2\\置换选择 + 最优二叉计划};
+\node[box,left=of p2] (p1) {Project 1\\分块内排 + 普通二叉计划};
+\node[box,right=of p2] (p3) {Project 3\\置换选择 + 多轮K路归并};
+\node[box,below=of p2,text width=125mm] (core) {InputBuffer / OutputBuffer\quad LoserTree\quad BufferPool};
+\node[box,below=of core,text width=125mm] (file) {RawInput / RunFile：二进制文件、目录、块读写};
+\draw[flow] (main)--(sort);\draw[flow] (sort)--(p2);
+\draw[flow] (sort.south -| p1)--(p1);\draw[flow] (sort.south -| p3)--(p3);
+\draw[flow] (p1)--(core.north -| p1);\draw[flow] (p2)--(core);\draw[flow] (p3)--(core.north -| p3);\draw[flow] (core)--(file);
+\end{tikzpicture}\caption{系统结构与公共模块，箭头表示上层调用下层}\label{fig:architecture}\end{figure}
+
+\code{RunFile}管理已经提交的目录和当前正在追加的段。算法返回目录下标，由调用者继续定位数据；这避免用“返回整个排序数组”的接口破坏外排序的空间约束。所有初始与中间结果顺序追加到同一个运行文件。目录中的旧段保持可读，当前归并列表决定哪些段参加下一轮。
+
+\section{三个项目的数据流与复用}
+\begin{table}[htbp]\centering\caption{三条完整数据处理路线}\label{tab:routes}
+\begin{tabularx}{\linewidth}{lYYY}\toprule
+环节 & Project 1 & Project 2 & Project 3\\\midrule
+共同输入 & \multicolumn{3}{l}{原始本机字节序\code{int32_t}文件，经RawInput按块访问}\\
+生成 & 固定$M$内排 & 败者树置换选择 & 复用置换选择\\
+初始结果 & \multicolumn{3}{l}{RunFile中命名为R0、R1等的有序段}\\
+计划/调度 & 相邻配对二叉树 & 最短两段优先二叉树 & 每轮按至多$k$段分组\\
+执行 & 后序 + twoWayMerge & 复用后序 + twoWayMerge & kWayMerge + BufferPool\\
+返回 & \multicolumn{3}{l}{新增最终段的目录下标finalRun，以及SortResult统计}\\\bottomrule
+\end{tabularx}\end{table}
+
+表\ref{tab:routes}体现了项目的递进关系。Project 2替换生成策略和计划策略，但沿用文件、缓冲及二路执行器；Project 3沿用长段生成与败者树，替换归并主控和输入块管理。K路阶段直接管理物理块队列，没有再为每一路永久配置两个\code{InputBuffer}对象。
+
+以Project 2默认输入为例，\code{main}先写15个整数；\code{sortFile}计算目录容量为$2\lceil15/4\rceil+1=9$；数据起点为$32+9\times48=464$字节。置换选择生成长度7、7、1的段，最优计划先归并1与7，再归并8与7。最终\code{main}根据返回段号分块读取15个值，与独立参考排序逐个核对。
+
+\section{主要源文件职责}
+\begin{longtable}{p{46mm}p{102mm}}
+\caption{模块、接口与调用关系}\label{tab:modules}\\\toprule 文件组 & 职责及连接方式\\\midrule\endfirsthead
+\toprule 文件组 & 职责及连接方式\\\midrule\endhead
+\code{main.cpp} & number严格解析数值，usage说明模式，main调用演示/测试或sortFile，再验证输出。\\
+\code{run_file.h/.cpp} & FileHeader、RunInfo、IoStats、RunFile、RawInput；负责创建文件、目录查询、段追加及数据块访问。\\
+\code{buffer.h/.cpp} & InputBuffer提供next；OutputBuffer提供writeValue和flush；连接逐元素算法与分块文件接口。\\
+\code{merge_plan.h/.cpp} & runGeneration、MergeNode、MergePlan、两类建树、twoWayMerge及executeMergePlan。\\
+\code{loser_tree.h/.cpp} & Candidate的valid/frozen/value状态；建树、取冠军、冠军路径重赛、解冻。\\
+\code{replacement.h/.cpp} & 双输入与双输出、输出值的段号标签、三线程置换选择及跨段写入。\\
+\code{kway_merge.h/.cpp} & InputBlock、BufferPool；预取选择、块生命周期、单组K路归并及多轮主控。\\
+\code{projects.h/.cpp} & SortResult与sortFile，连接生成和归并策略，记录计时与计数。\\
+\code{tests/test_sort.h/.cpp} & 机制断言、Week 3演示、220次精确对照、固定种子12行Benchmark。\\
+\code{CMakeLists.txt} & C++11、线程库、警告选项、目标源文件以及6项CTest；不参与运行算法。\\\bottomrule
+\end{longtable}
+
+每组头文件定义类型及接口，\code{.cpp}给出实现。第\ref{chap:source}章列出全部17个正式C++文件，表\ref{tab:modules}按模块合并展示，不表示省略对应头文件或实现。Windows的一键脚本、CMake预设和VS Code配置属于验收支持层，不改变排序的模块边界。
+
+\section{关键不变量与错误传播}
+文件层保证已提交目录项描述连续且在文件范围内的数据；未完成段只存在于\code{pending_}，直到\code{endRun}更新目录。缓冲层保证$0\le pos\le count\le B$，只有有效范围被消费。候选树保证所有有效未冻结值优先于冻结值及无效叶，冠军始终代表当前允许输出的最小值。
+
+并行层强调阶段内所有权：输入线程写预留块，计算线程操作已公开块，输出线程只读上一阶段输出。三个任务的异常分别存入\code{errors[3]}，主线程全部\code{join}后才读取并重抛。若后续线程创建失败，也先回收已启动线程，再向顶层报告，避免可连接线程在析构时终止进程。
+
+\section{Git演进与可复现交付}
+仓库\url{https://github.com/David-JayTao/Experiment-External-Memory-Sorting}保存一个持续演进工程。\code{week3-complete}至\code{week8-complete}对应功能检查点：文件缓冲、二路计划、长段、动态池、K路主控、最终测试。标签保留当时源码和支持的命令，不将当前所有功能倒写到早期版本，也不改动真实提交时间。
+
+Windows配置与中文注释分别形成独立中文提交。源码附录从最后验收版本自动生成，版本号写在第\ref{chap:source}章。个人姓名、学号及正式报告保存在本地被忽略的\code{report/}目录；公开仓库只保留源码及通用验收资料。复现报告只需该目录中的LaTeX、截图、CSV、矢量图和代码快照，不需要编译产物或安装包。

@@ -1,0 +1,132 @@
+{
+  "commit": "478a7ec6bcc95793a0e5540225609df04986bae2",
+  "cpp_files": 17,
+  "files": [
+    {
+      "path": "main.cpp",
+      "bytes": 7362,
+      "lines": 134,
+      "sha256": "5adb9c5f781e57409dc9a5e24f379a4b9c9ef630ad8a46fbe69ae2d77172cca6",
+      "cpp": true
+    },
+    {
+      "path": "src/buffer.cpp",
+      "bytes": 1624,
+      "lines": 35,
+      "sha256": "72d36a90f53fc63840a79cb1068eb13a3d37a96292ce83995d13c764ffbd052d",
+      "cpp": true
+    },
+    {
+      "path": "src/buffer.h",
+      "bytes": 1452,
+      "lines": 32,
+      "sha256": "c6e15fbfb1c7a846962e1a0902949a3ff5a62c1abbe7e31b0794a5e503cabe8a",
+      "cpp": true
+    },
+    {
+      "path": "src/kway_merge.cpp",
+      "bytes": 11509,
+      "lines": 221,
+      "sha256": "57008547c27374eda06cbdeba9ba32e6ee312c3e1abf07f3d275a370d7d1a7e4",
+      "cpp": true
+    },
+    {
+      "path": "src/kway_merge.h",
+      "bytes": 2722,
+      "lines": 49,
+      "sha256": "d35ccd124fe69e5b26939dc6d367866c17bcf18969d685cd4a2a2fc38fcc8f59",
+      "cpp": true
+    },
+    {
+      "path": "src/loser_tree.cpp",
+      "bytes": 3183,
+      "lines": 62,
+      "sha256": "9b9ed2c961afe5c30d4578cf8680e6662a3075299ec17965d00d32d98b57ea4f",
+      "cpp": true
+    },
+    {
+      "path": "src/loser_tree.h",
+      "bytes": 1376,
+      "lines": 31,
+      "sha256": "12bfb515c92b410a8f75230a48b997523514e4c39d00c0202a0f57fdb314aa18",
+      "cpp": true
+    },
+    {
+      "path": "src/merge_plan.cpp",
+      "bytes": 6597,
+      "lines": 135,
+      "sha256": "02bb270245f1e0370e10cb3c8e34c221d1af4ea97a7f74e3f666713d94f906c8",
+      "cpp": true
+    },
+    {
+      "path": "src/merge_plan.h",
+      "bytes": 1762,
+      "lines": 30,
+      "sha256": "3b81fe061f37850f2f14a73d37c011a2eabec212df424f5582302ad8a241737e",
+      "cpp": true
+    },
+    {
+      "path": "src/projects.cpp",
+      "bytes": 3791,
+      "lines": 65,
+      "sha256": "d99fc83576433fa311c4d4e2d9c241f02316ad1885f7182482c3399c03102e9a",
+      "cpp": true
+    },
+    {
+      "path": "src/projects.h",
+      "bytes": 994,
+      "lines": 18,
+      "sha256": "741bf94ca53020c339868071dcdab8d83b92283d18fab0cf96e092f6f846cfe3",
+      "cpp": true
+    },
+    {
+      "path": "src/replacement.cpp",
+      "bytes": 8717,
+      "lines": 156,
+      "sha256": "483cd6f7dedb11547cb1cd311261eac03ef29050554bc8ec4f68f879d70a2562",
+      "cpp": true
+    },
+    {
+      "path": "src/replacement.h",
+      "bytes": 516,
+      "lines": 10,
+      "sha256": "b98a57d0059615b5ae45a04444aea52d1db32a9662499ee28ad280217dd657ec",
+      "cpp": true
+    },
+    {
+      "path": "src/run_file.cpp",
+      "bytes": 8727,
+      "lines": 155,
+      "sha256": "ffaabe09bba928d395843647bd281efacffdd13c04ee7ad25c80c5bf36f89eeb",
+      "cpp": true
+    },
+    {
+      "path": "src/run_file.h",
+      "bytes": 3880,
+      "lines": 77,
+      "sha256": "a0bebd1882420cb88f099344a1401ebca796d600c1f2f57c928bb81fa19af921",
+      "cpp": true
+    },
+    {
+      "path": "tests/test_sort.cpp",
+      "bytes": 13168,
+      "lines": 255,
+      "sha256": "713057a5f45c30ca71a682ba9eedff9214c0d38573600679ea940f3801c18c68",
+      "cpp": true
+    },
+    {
+      "path": "tests/test_sort.h",
+      "bytes": 331,
+      "lines": 9,
+      "sha256": "46c5ba97d42343b4eb9532cd0f854ddf13388e20c76eba525af27dfe3445ca3a",
+      "cpp": true
+    },
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 1234,
+      "lines": 25,
+      "sha256": "2ebc98826bcee7f40c8e3b83edfc0c6effaf40b46054c87edd6755b918bcdfc6",
+      "cpp": false
+    }
+  ]
+}

@@ -7,4 +7,6 @@ build*/
 *.mp3
 *.wav
 CMakeUserPresets.json
-report/
+report/build/
+!report/evidence/comments-debug-all.log
+!report/evidence/comments-release-all.log

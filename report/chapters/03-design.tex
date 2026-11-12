@@ -1,0 +1,273 @@
+\chapter{功能模块设计}
+\section{二进制文件组织}
+\subsection{物理布局与定位公式}
+\code{FileHeader}用32字节保存标识、目录容量、已提交段数以及目录和数据起点。\code{RunInfo}用48字节保存32字节名称、64位字节偏移与64位元素数量。编译期\code{static_assert}检查结构大小；文件直接保存这些结构的本机表示，不声称能跨字节序交换。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\node[box,text width=23mm,minimum height=17mm] (h) at (0,0) {Header\\32字节};
+\node[box,text width=51mm,minimum height=17mm,right=2mm of h] (d) {Directory\\$48\times maxRuns$字节};
+\node[box,text width=47mm,minimum height=17mm,right=2mm of d] (data) {Data\\R0、R1、M/K中间段};
+\node[below=2mm of h,font=\small] {起点0};
+\node[below=2mm of d,font=\small] {起点32};
+\node[below=2mm of data,font=\small] {$32+48\times maxRuns$};
+\end{tikzpicture}\caption{归并文件物理布局；目录预留区大小在创建时固定}\label{fig:file-layout}\end{figure}
+
+图\ref{fig:file-layout}中目录容量与已用数量分开。预留目录保证后续追加一项不会挤占原数据区。第$i$段内零起始下标$p$的整数位于
+\begin{equation}
+\operatorname{address}(i,p)=\operatorname{RunInfo}[i].offset+p\cdot\operatorname{sizeof}(int32\_t),\quad 0\le p<count_i.
+\end{equation}
+段号、段内元素下标和文件字节偏移是三个不同概念。\code{readBlock}先检查段号，再计算实际数量$\min(B,count_i-p)$，定位并读取；$p=count_i$返回0，$p>count_i$拒绝。每次读写都重新\code{seekg/seekp}，不依赖上一次操作留下的流位置。
+
+\subsection{Scan、Put、Search与流式提交}
+\code{scan()}返回已加载的目录常量引用，遍历目录不会自动加载段数据；\code{search(name)}逐项比较名称，找到返回目录下标，否则返回$-1$。\code{put(name,values)}是小数据的便利包装，适合Week 3与机制测试。正式长段采用表\ref{tab:append}中的流式接口。
+
+\begin{table}[htbp]\centering\caption{一次归并段追加的状态变化}\label{tab:append}
+\begin{tabularx}{\linewidth}{lYY}\toprule
+调用 & 前置条件与行为 & 状态结果\\\midrule
+beginRun & 可写、无待写段、目录未满、名称合法且不重复 & pending记录名称与endOffset，writing为true\\
+writeBlock & 已开启段，追加count个整数；空块跳过 & pending.count加count，endOffset加$4count$\\
+endRun & 调用方先刷新尾块，再写目录与头部并flush & 更新runCount、加入runs，返回新目录下标\\\bottomrule
+\end{tabularx}\end{table}
+
+数据先写、目录后提交，使读取者只通过已完成目录访问完整段。\code{endRun}显式刷新并检查流状态，随后另开只读文件可以看到结果；但它不是掉电原子事务。打开文件时检查标识、目录边界、段连续性和数据范围，能发现常见截断或损坏，不等于完整的恶意输入安全解析器。
+
+Week 3创建容量8的目录，数据从416字节开始。A为$[-5,2,8]$，占12字节；B为$[0,1]$，起点428；C为$[3,4,5,6,7]$，起点436。重新打开后逐块输出仍应相同，Search C得到2，missing得到$-1$。这一例子同时检查物理偏移与目录语义。
+
+\section{输入与输出缓冲区}
+\code{InputBuffer}绑定一个段和一个容量为$B$的数组，维护\code{nextOffset_}、\code{pos_}、\code{count_}。\code{next}在$pos=count$时补下一块，推进段内下一读取位置并把$pos$清零；读到0说明段耗尽，否则把一个整数通过引用参数交给调用者。长度7、$B=3$时，底层返回数量依次为3、3、1、0，只有前三次增加读计数。
+
+\code{OutputBuffer}维护有效数量，\code{writeValue}填一个值，达到$B$立即\code{flush}；最后不足$B$的尾块由调用者显式刷新，再提交段。析构不隐式写盘，避免把可能抛出错误的I/O藏在资源销毁过程中。连续调用空刷新不会产生额外非空块计数。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=7mm]
+\node[box,text width=26mm] (a) {段文件\\按块读};
+\node[box,text width=28mm,right=of a] (b) {InputBuffer\\逐个next};
+\node[box,text width=23mm,right=of b] (c) {比较与选择};
+\node[box,text width=30mm,right=of c] (d) {OutputBuffer\\满块/尾块写};
+\draw[flow](a)--(b);\draw[flow](b)--(c);\draw[flow](c)--(d);
+\end{tikzpicture}\caption{缓冲区连接块传输与逐元素计算，输出再追加到段文件}\label{fig:buffer-flow}\end{figure}
+
+图\ref{fig:buffer-flow}中的封装让二路归并只考虑当前值和有效性，而无需在比较循环中重复写补块逻辑。\code{IoStats*}可为空，验证层由此不把额外扫描算入排序指标。缓冲对象借用文件引用，文件应在对象使用期间始终存活。
+
+\section{固定容量初始归并段生成}
+\code{runGeneration(rawPath,file,M,B,stats)}用一个长度$M$的数组。每轮按不超过$B$的块读取，直到凑满$M$或文件结束；只对有效范围调用\code{std::sort}，随后用输出缓冲逐个写出，刷新并提交为\code{R0}、\code{R1}等。返回的是段号序列，不是数据副本。
+
+\begin{enumerate}
+\item 令当前有效数为0，按$\min(B,M-count)$读取到工作数组剩余位置。
+\item 若实际读入总数为0则结束；否则在$[0,count)$内排序。
+\item 开启新段，按$B$写完已排序值，尾块刷新后提交目录。
+\item 重复直至原始输入耗尽；空输入不生成空初始段。
+\end{enumerate}
+
+默认输入$[9,1,8,2,7,3,6,4,5,0,-1,3,12,2,10]$取$M=4$得到表\ref{tab:initial}。每个长度4的段在$B=3$时分两次写，不能把段数或段长度误认为I/O块数。
+
+\begin{table}[htbp]\centering\caption{Project 1默认输入的初始段}\label{tab:initial}
+\begin{tabular}{clrr}\toprule 段 & 排序后内容 & 元素数 & 字节起点\\\midrule
+R0 & 1, 2, 8, 9 & 4 & 464\\
+R1 & 3, 4, 6, 7 & 4 & 480\\
+R2 & $-1$, 0, 3, 5 & 4 & 496\\
+R3 & 2, 10, 12 & 3 & 512\\\bottomrule
+\end{tabular}\end{table}
+
+比较成本为$O(N\log M)$，工作数组及输出块为$O(M+B)$，另有$O(R)$段号及目录。若$M$不整除$B$，每个工作区末次读取可能不足块；真实调用数要逐段取整，不能直接等同于$\lceil N/B\rceil$。
+
+\section{二路归并与二叉计划执行}
+\subsection{节点表示与普通计划}
+\code{MergeNode}包含左右孩子下标、实际段号与长度。叶子孩子为$-1$，段号已知；内部节点的段号初始为$-1$，执行后记录结果。\code{MergePlan}保存节点数组、根和代价。建树先放叶子，再逐层相邻配对，所以孩子下标小于父节点，根在末尾。
+
+图\ref{fig:binary-tree}是表\ref{tab:initial}对应的真实计划，方框中表示节点下标与长度。节点4先合并0与1，节点5合并2与3，最后根6合并4与5。建树仅访问目录，真正的数据I/O发生于后序执行。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[level distance=13mm,sibling distance=65mm,every node/.style={draw=accent,fill=pale,rounded corners,align=center,font=\small},edge from parent/.style={draw=accent,thick}]
+\node {6：长度15}
+child {node {4：长度8} child[sibling distance=29mm]{node {0：R0\\长度4}} child[sibling distance=29mm]{node {1：R1\\长度4}}}
+child {node {5：长度7} child[sibling distance=29mm]{node {2：R2\\长度4}} child[sibling distance=29mm]{node {3：R3\\长度3}}};
+\end{tikzpicture}\caption{普通归并计划的具体节点与依赖，总代价$8+7+15=30$}\label{fig:binary-tree}\end{figure}
+
+\subsection{后序执行与两路选择}
+\code{executeMergePlan}遇到根$-1$返回$-1$；遇到已有段号的节点直接返回；否则先递归完成左、右子树，将返回的两个段号交给\code{twoWayMerge}，把新段号写回当前节点。缓存结果保证同一计划节点不会被重复执行。递归栈只保存少量状态，不保存各层完整数据。
+
+\code{twoWayMerge}建立左右输入缓冲和一个输出缓冲，用\code{hasLeft/hasRight}区分合法值与结束。每次输出较小头值，只推进对应输入；相等优先左路，一方耗尽后排空另一方。结果仍以新段追加到同一文件。这里使用同一个\code{fstream}是安全的，因为两路读取和写入都在同一线程顺序执行。
+
+若左右长度为$a,b$，CPU比较/移动为$O(a+b)$，整数缓冲为$3B$。一次归并数据块调用数为
+\begin{equation}
+Q_{\rm merge}=\left\lceil\frac{a}{B}\right\rceil+\left\lceil\frac{b}{B}\right\rceil+\left\lceil\frac{a+b}{B}\right\rceil.
+\end{equation}
+这里不包含文件头与目录读写。正确性可由不变量说明：输出前缀已排序，且其中每个元素不大于两路剩余值；取较小头值保持这一性质，最终数量为$a+b$。
+
+\section{败者树的结构与更新规则}
+败者树叶子是\code{Candidate(value,valid,frozen)}。内部数组\code{losers_}保存每场比赛的败者叶下标，总冠军另存\code{champion_}。候选数补齐至2的幂，多出的叶子标为无效，不占真实候选名额。\code{valid=false}代表EOF或补齐叶，避免用\code{INT_MAX}哨兵排除真实最大整数。
+
+比较顺序为有效优先、未冻结优先、数值小优先、叶下标小优先。\code{build}从子树取得两个冠军，将败者留在当前内部节点，赢家向父亲返回。\code{winner}若发现总冠军无效便返回$-1$；\code{top}只在仍有冠军时作为有效输出使用。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[level distance=13mm,sibling distance=62mm,every node/.style={draw=accent,fill=pale,align=center,font=\small,rounded corners},edge from parent/.style={draw=accent}]
+\node {内部1存叶3（值2）\\总冠军：叶1（值1）}
+child {node {内部2存叶0（值9）} child[sibling distance=27mm]{node {叶0：9}} child[sibling distance=27mm]{node {叶1：1}}}
+child {node {内部3存叶2（值8）} child[sibling distance=27mm]{node {叶2：8}} child[sibling distance=27mm]{node {叶3：2}}};
+\end{tikzpicture}\caption{候选$[9,1,8,2]$的败者树；内部持久存储的是败者下标}\label{fig:loser}\end{figure}
+
+图\ref{fig:loser}中输出1后用7替换叶1。7先与记录的9比较获胜，再与记录的2比较失败，根留下叶1，总冠军改为叶3。只需沿被替换冠军的叶到根路径重赛，因为其他子树的比赛没有变化。该接口不能直接更新任意非冠军叶；本项目两处调用都符合“输出冠军后补入”的条件。
+
+建树与批量解冻重建均为$O(M)$，单次冠军替换为$O(\log M)$。在K路归并中把$M$换为实际路数。平局按叶下标处理使演示确定，但本项目只排序整数，没有携带记录身份来承诺任意记录的全局稳定性。
+
+\section{置换选择与冻结机制}
+\subsection{从固定候选到长归并段}
+\code{replacementSelection}先按块装入至多$M$个候选，构造败者树，再预载活动输入。每输出一个冠军，从活动输入补一个新值。如果新值不小于刚输出值，则仍能接在当前非降序段后；若更小，则保留在候选中并冻结。所有有效候选均被冻结时，总冠军也会被冻结，程序增加段号并\code{thaw}。
+
+\begin{table}[htbp]\centering\caption{默认15值输入的第一段置换过程，$M=4$}\label{tab:replacement}
+\begin{tabular}{rrll}\toprule 输出 & 补入 & 新候选状态 & 解释\\\midrule
+1 & 7 & 活动 & $7\ge1$\\
+2 & 3 & 活动 & $3\ge2$\\
+3 & 6 & 活动 & $6\ge3$\\
+6 & 4 & 冻结 & $4<6$，不能接入当前段\\
+7 & 5 & 冻结 & $5<7$\\
+8 & 0 & 冻结 & $0<8$\\
+9 & $-1$ & 冻结 & 全部有效候选冻结，结束R0\\\bottomrule
+\end{tabular}\end{table}
+
+表\ref{tab:replacement}得到R0=$[1,2,3,6,7,8,9]$。解冻后生成R1=$[-1,0,3,4,5,10,12]$，再生成R2=$[2]$。三个段长为7、7、1，偏移为464、492、520。输入中重复值通过严格小于判断保留在当前段，不会因相等而不必要地冻结。
+
+对于升序输入，新数持续满足条件，有可能只生成一个长段；对于逆序输入，新数频繁冻结，不能保证长于$M$。随机输入常出现平均接近$2M$的段长，但这依赖分布和模型，本实现不把它作为任意输入的长度保证。
+
+\subsection{段边界、暂时缺块与真正结束}
+输出内存块可能跨段，\code{GeneratedBlock}因此同时保存\code{values}和逐元素\code{runNumbers}。默认$B=3$时第三块为$[9,-1,0]$，段号为$[0,1,1]$。\code{writeGeneratedBlock}把它拆成同段连续区间，先写9并提交R0，再开启R1写$[-1,0]$。一个内存块由此可能对应多次数据写调用。
+
+计算线程区分两种状态：活动输入块暂时耗尽但后面仍有数据，应结束本阶段等待；原始输入真正全部读完，才用无效候选逐个替换并排空树。阶段开始的\code{noMoreAfterActive}是由主线程确定的快照，避免计算线程读取输入线程正在修改的备用块计数。
+
+即使树已空，上一阶段输出仍可能未写盘。循环条件必须同时检查树和待写输出，最后再关闭仍打开的段。这个排空规则与显式尾块刷新共同保证数量不丢失。
+
+\section{三线程分阶段并行与双缓冲}
+\subsection{阶段内的数据所有权}
+置换选择有两输入块和两输出块。\code{activeInput}供计算消费，另一个输入块供预取；\code{activeOutput}供计算填充，另一个输出块供写回。两个索引只在主线程完成三个\code{join}之后更新。图\ref{fig:stages}展示稳定阶段的任务分工。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+\foreach \y/\t in {0/输入线程,-0.9/计算线程,-1.8/输出线程}{\node[anchor=east,font=\small] at (0,\y){\t};}
+\foreach \x/\label in {0.2/阶段$t$,4.1/阶段$t+1$}{
+\node[font=\small\bfseries] at (\x+1.65,0.65){\label};
+\draw[fill=pale,draw=accent] (\x,-0.3) rectangle ++(3.3,0.6);
+\draw[fill=pale,draw=accent] (\x,-1.2) rectangle ++(3.3,0.6);
+\draw[fill=pale,draw=accent] (\x,-2.1) rectangle ++(3.3,0.6);}
+\node[font=\small] at (1.85,0){读备用输入};\node[font=\small] at (1.85,-0.9){读活动输入，填$O_a$};\node[font=\small] at (1.85,-1.8){写上一阶段$O_b$};
+\node[font=\small] at (5.75,0){按需补空输入};\node[font=\small] at (5.75,-0.9){继续选冠军，填$O_b$};\node[font=\small] at (5.75,-1.8){写已完成$O_a$};
+\draw[dashed,thick,accent] (3.8,0.35)--(3.8,-2.5);
+\node[below,align=center,font=\small] at (3.8,-2.5){三个join完成\\主线程交接角色};
+\end{tikzpicture}\caption{三线程的阶段同步；输入仅在耗尽时切换，输出每阶段交替}\label{fig:stages}\end{figure}
+
+\begin{table}[htbp]\centering\caption{阶段内可写状态与同步后的处理}\label{tab:ownership}
+\small\begin{tabularx}{\linewidth}{lYY}\toprule 执行者 & 置换选择 & K路归并\\\midrule
+输入线程 & 原始读流、备用输入块、readBlocks & 独立只读source、预留物理块、readBlocks\\
+计算线程 & 树、活动输入位置、活动输出、currentRun & 树、消费队列、released、活动输出、emitted\\
+输出线程 & 上阶段输出、段文件、writtenRun、writeBlocks & 上阶段输出、段文件、writeBlocks\\
+主线程 & join后累加loaded、按需换输入、换输出 & join后归还块、发布预取块、换输出\\\bottomrule
+\end{tabularx}\end{table}
+
+表\ref{tab:ownership}说明无需在本实现中引入互斥锁的原因：阶段内可写对象不重叠，主线程不提前观察正在写的数据。输入和输出分别修改\code{IoStats}中不同标量成员；阶段数仅在join后更新。日志也限定由计算线程或同步后的主线程输出。
+
+\subsection{交接顺序与异常收尾}
+活动输入不一定在每个阶段都恰好用完，例如输出已满时还留有未消费输入。程序只有在$pos=count$时清空该块并切换，避免无条件换块跳过数据。输出线程处理完旧块后，主线程清空它，作为下一阶段的计算输出。
+
+每阶段新建三个\code{std::thread}，随后逐个join。它们可以并行执行，但某个阶段可能没有预取任务或没有上一块可写，启动和排空阶段尤其如此。这个实现服务于课程的阶段同步机制，不是持续运行的线程池。阶段总耗时受最慢任务、线程创建以及调度影响，不能简单把单线程时间除以三。
+
+线程内部异常必须捕获到各自的\code{exception_ptr}槽；主线程join之后再重抛。对线程创建失败的路径也保留已启动线程的join收尾。测试未故意耗尽系统线程资源，因此报告只声明该分支经代码审查，不将正常测试冒称为已覆盖此类系统故障。
+
+\section{哈夫曼最优归并计划}
+\code{buildOptimalPlan}将每个段转换为叶子，将$(length,nodeIndex)$放入最小优先队列。每次弹出两个最短节点，建立长度为两者之和的父节点，并重新入队，直到剩下根。等长时用节点下标确定先后，计划可重复。
+
+设初始段$i$经过$d_i$次归并，则每个元素被复制$d_i$次，总代价满足
+\begin{equation}
+C=\sum_{v\text{为内部节点}}L_v=\sum_{i=1}^{R}L_i d_i.
+\end{equation}
+哈夫曼方法优化这一加权路径长度。它并不直接优化尾块取整、目录访问、缓存行为或CPU时间，因此最优计划不等于实际计时总是最快。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[every node/.style={font=\small,align=center},edge from parent/.style={draw=accent},level distance=12mm]
+\node at (-3.1,0) {普通：15}
+ child[sibling distance=26mm]{node {14} child[sibling distance=17mm]{node {R0：7}} child[sibling distance=17mm]{node {R1：7}}}
+ child[sibling distance=26mm]{node {R2：1}};
+\node at (3.1,0) {最优：15}
+ child[sibling distance=26mm]{node {R1：7}}
+ child[sibling distance=26mm]{node {8} child[sibling distance=17mm]{node {R2：1}} child[sibling distance=17mm]{node {R0：7}}};
+\node at (-3.1,-3.1){$C=14+15=29$};\node at (3.1,-3.1){$C=8+15=23$};
+\end{tikzpicture}\caption{实际段长7、7、1的两种计划，执行器均复用二路后序归并}\label{fig:huffman}\end{figure}
+
+图\ref{fig:huffman}中最优计划先生成长度8的M3，再生成长度15的M4。独立机制测试另用段长1、2、3、100验证普通代价212、最优代价115，防止只凭一次演示判断建树正确。建树的CPU成本为$O(R\log R)$，节点和优先队列为$O(R)$。
+
+\section{真正K路选择与多轮归并}
+\subsection{单组归并的阶段主循环}
+\code{kWayMerge(file,runs,k,B,stats,trace)}接收至多$k$个段号，复制本组元数据并求总长度，另开只读\code{RunFile source}，初始化共享池，在原文件开启新K段。读线程访问已完成段，写线程追加后续区域，两个线程不共享同一个\code{fstream}对象。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=6mm]
+\node[box,text width=117mm] (a){初始化各路首块，开启输出段，emitted=0};
+\node[box,text width=117mm,below=of a] (b){选预取路并保留空闲块；收集已公开头值，重建败者树};
+\node[box,text width=117mm,below=of b] (c){输入读预留块 / 计算选最小并填活动输出 / 输出写上一块};
+\node[box,text width=117mm,below=of c] (d){三个join；回收耗尽块；公开预取块；交换输出};
+\node[box,text width=117mm,below=of d] (e){未输出完或还有待写块：继续；否则endRun返回段号};
+\draw[flow](a)--(b);\draw[flow](b)--(c);\draw[flow](c)--(d);\draw[flow](d)--(e);
+\draw[flow](e.west)--++(-0.5,0)|-(b.west);
+\end{tikzpicture}\caption{K路归并阶段流程，循环末尾必须包含写出最后一块}\label{fig:kflow}\end{figure}
+
+图\ref{fig:kflow}中的计算任务不是多次二路归并。它把实际各路头值组成一棵败者树，每输出一个冠军，消费该路一个值，再用该路新头替换冠军。若某条尚未结束的路暂时没有头值，\code{missingHead}使本阶段等待补块；若消费过程中出现这种状态，也立即结束本阶段计算。忽略未知头值会破坏全局最小值判断。
+
+实现每阶段重新构造头值树，以纳入同步后公开的新块；阶段内部才使用冠军路径重赛。因此复杂度必须包括每阶段$O(k)$建树和扫描，不能只写理想的$O(N\log k)$。每阶段最多产生$B$个值，缺头时可能少于$B$，尾输出也需完整写出。
+
+\subsection{多轮主控与不足K路的末组}
+\code{mergeKRuns}把当前段号每$k$个分组；组内至少两个时调用一次K路归并，单个段直接带入下一轮。一次归并产生一个新段，但磁盘上的旧段保持不变。段号列表替换后继续，直到只剩一个；空输入返回$-1$。
+
+例如实际99段、$k=4$时，段数为$99\to25\to7\to2\to1$，共4轮。归并组数为$25+6+2+1=34$：第二轮25段的最后单段直接带过，并不新增一次合并。\code{rounds}是多轮主控次数，\code{merges}是产生新段的归并组数，\code{stages}是线程同步阶段，三者不可互换。
+
+\section{动态输入缓冲池与预取策略}
+\subsection{物理块与逻辑队列分离}
+\code{BufferPool.blocks_}一次分配$2k$个物理块，每块有整数数组、有效数量和消费位置。\code{queues_[lane]}只保存块号，\code{free_}保存可再分配块，\code{released_}暂存本阶段刚耗尽的块。\code{next_}记每路已读数量，\code{lengths_}是总长度，\code{lastKeys_}是所有已读数据的末值。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=7mm]
+\node[box,text width=106mm] (all){物理池：块0、1、2、3、4、5（$k=3$，每块容量$B$）};
+\node[box,text width=31mm,below=of all] (q1){路1队列：[1]};
+\node[box,text width=31mm,left=5mm of q1] (q0){路0队列：[0,3]};
+\node[box,text width=31mm,right=5mm of q1] (q2){路2队列：[2]};
+\node[box,text width=106mm,below=of q1] (free){空闲：[4,5]\quad 已消费块经join后归还，下一阶段可跨路使用};
+\draw[flow](all)--(q1);\draw[flow](all.south -| q0)--(q0);\draw[flow](all.south -| q2)--(q2);
+\draw[flow](q0.south)--(free.north -| q0);\draw[flow](q2.south)--(free.north -| q2);
+\end{tikzpicture}\caption{默认示例第一个K路计算阶段同步后的队列状态}\label{fig:pool}\end{figure}
+
+图\ref{fig:pool}中物理块和路没有永久绑定。初始化为每个非空段读一块，其余块保留为空闲；下一次预取用\code{reserve}取出一个块。读线程只填该块，join后\code{finishPrefetch}才把块号入队并更新\code{next_}和\code{lastKeys_}。消费块由计算线程出队，但仅登记到\code{released_}，主线程同步后统一归还，避免块仍被读取时就被重写。
+
+\subsection{预取选择与真实跨路回收}
+正常预取规则可写为
+\begin{equation}
+\operatorname{target}=\arg\min_{i:\ next_i<length_i}\operatorname{lastKeys}_i,
+\end{equation}
+并附加“仍有磁盘数据的空队列优先”规则。\code{lastKeys}不是队首最小值，也不是尚未读取的整段最大值；它由最近完成读取的块末值更新。已经全部读入的路不再预取，即使其队列尚有很多未消费数据。
+
+默认三路首块分别为$[1,2,3]$、$[-1,0,3]$、$[2]$。路2已全部读入；路0、1末值相同，先选路0读$[6,7,8]$，之后选末值仍为3的路1。路2的物理块2被消费后回收，后续日志出现\code{prefetch lane=1 block=2}，用来读取路1的最后值12。这是实际跨路复用，不是仅在结构命名上叫“动态池”。
+
+独立测试还让路0占有4个物理块、其他两路各占1块，共6块，证明并非永久每路两个。当没有可用块时\code{reserve}返回$-1$，本阶段不执行预取；计算继续释放块后再尝试。调度强调正确交接，不对所有系统时序承诺零等待。
+
+\section{复杂度、内存与I/O成本}
+\begin{longtable}{p{35mm}p{61mm}p{51mm}}
+\caption{核心算法的CPU与额外内存成本}\label{tab:complexity}\\\toprule
+模块 & CPU成本与条件 & 额外内存\\\midrule\endfirsthead
+\toprule 模块 & CPU成本与条件 & 额外内存\\\midrule\endhead
+固定分块生成 & $O(N\log M)$，段数$\lceil N/M\rceil$ & $O(M+B)$整数工作区，另有$O(R)$元数据\\
+普通二叉计划 & $O(R)$建树；后序遍历$O(R)$，数据合并总计$O(C)$ & $O(R)$节点，递归深度通常$O(\log R)$\\
+哈夫曼计划 & $O(R\log R)$建树；执行总数据处理$O(C)$ & $O(R)$节点和队列，最坏树深$O(R)$\\
+单次二路归并 & 长度$a,b$时$O(a+b)$ & $3B$个整数及常量状态\\
+败者树 & 建树/解冻$O(M)$，一次更新$O(\log M)$ & $O(M)$候选和败者下标\\
+置换选择 & $O(N\log M+RM)$，另有$S$次阶段调度 & $O(M+B)$，含双输入、双输出及段号标签\\
+K路单组归并 & 总长度$T$时$O(T\log k+S_g k)$，$S_g$为本组阶段数 & $O(kB+k)$，含$2k$输入和2输出块\\
+预取及块管理 & 每阶段选择$O(k)$；每个块入队、出队、回收均摊$O(1)$ & 队列和状态$O(k)$，块数据计入上项\\\bottomrule
+\end{longtable}
+
+表\ref{tab:complexity}区分了核心算法与实现附加项。\code{beginRun}为检查重名进行线性目录查询，累计创建$D$段可能引入$O(D^2)$名称比较；K路每次另开只读RunFile还会读取当前目录。\code{sortFile}在Project 3也构造一次普通计划用于cost指标。这些元数据工作没有出现在理想归并的比较模型里，但属于实际运行时间。全部目录和历史计划仍需$O(R)$内存，不能宣称整个进程空间恒定。
+
+忽略部分块、元数据及系统缓存，若每轮将全部$N$个值读写一次，初始段数为$R$，K路归并层数约为$L=\lceil\log_k R\rceil$，理想数据传输约为
+\begin{equation}
+Q_{\rm ideal}\approx 2\frac{N}{B}(1+L).
+\end{equation}
+首个1代表生成段的一读一写。真实实现有单段带过、各段尾块、置换输出跨段分拆、K路缺头提前结束阶段，因此应以\code{readBlocks/writeBlocks}为应用层调用的实测依据。最优树的$C$衡量元素量，也不能未经换算直接称为块I/O。
+
+内存比较亦有条件：二路归并使用$3B$整数块，K路使用$(2k+2)B$，即使各项目设置同样$M,B$也不是同一总字节预算。哈夫曼减少搬移、置换选择减少段数、K路减少轮数，各自优化不同环节；线程创建与join、缓存、文件系统会共同决定最终耗时。
