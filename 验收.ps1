@@ -46,7 +46,7 @@ function Invoke-Checked([string]$Tool, [string[]]$ToolArgs) {
 }
 
 function Invoke-Item([string]$Title, [string[]]$ProgramArgs, [switch]$CTest) {
-    Write-Host "`n========== $Title ==========" -ForegroundColor Cyan
+    Write-Host "`n $Title " -ForegroundColor Cyan
     $passed = $false
     Push-Location -LiteralPath $runDir
     try {
@@ -74,7 +74,7 @@ try {
     if ($Large -and $Mode -ne 'project3') { throw '-Large 仅适用于 project3；all 已包含大规模验收。' }
     $cmake = Find-CMake
     $script:ctest = Join-Path (Split-Path -Parent $cmake) 'ctest.exe'
-    Write-Host "`n========== Windows 原生配置 / $Configuration ==========" -ForegroundColor Cyan
+    Write-Host "`n Windows 原生配置 / $Configuration " -ForegroundColor Cyan
     Write-Host "CMake：$cmake"
     # 首次配置显式选择实际安装的 VS；版本名来自 CMake 能力列表，不写死 VS 年份。
     $configureArgs = @('--preset', 'windows')
@@ -95,7 +95,7 @@ try {
     if (-not ($cache -match '^CMAKE_GENERATOR:INTERNAL=Visual Studio ')) {
         throw 'build/windows 必须使用 Visual Studio 多配置生成器；请将旧目录改名后重新运行。'
     }
-    Write-Host "`n========== 增量编译 ==========" -ForegroundColor Cyan
+    Write-Host "`n 增量编译 " -ForegroundColor Cyan
     Invoke-Checked $cmake @('--build', '--preset', $preset)
     if (-not (Test-Path -LiteralPath $exe)) { throw "编译未生成预期程序：$exe" }
     New-Item -ItemType Directory -Force -Path $runDir | Out-Null
@@ -121,7 +121,7 @@ try {
         Invoke-Item $Mode @($Mode)
     }
     if ($results.Count -gt 0) {
-        Write-Host "`n========== 实际验收汇总 / $Configuration ==========" -ForegroundColor Cyan
+        Write-Host "`n 实际验收汇总 / $Configuration " -ForegroundColor Cyan
         $results | Format-Table -AutoSize | Out-Host
         if (@($results | Where-Object Status -eq 'FAIL').Count -gt 0) { $exitCode = 1 }
     }

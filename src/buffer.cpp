@@ -2,14 +2,28 @@
 #include <stdexcept>
 // 绑定一个已存在的段并分配B个整数；构造时校验容量和段号。
 InputBuffer::InputBuffer(RunFile& file, int runIndex, size_t blockSize, IoStats* stats)
-    : file_(file), runIndex_(runIndex), data_(blockSize), nextOffset_(0), pos_(0), count_(0), stats_(stats) {
+    : file_(file), runIndex_(runIndex), data_(blockSize), nextOffset_(0), pos_(0), count_(0), stats_(stats) 
+{
     if (blockSize == 0) throw std::runtime_error("block size must be positive");
     file_.run(runIndex);
 }
 // 向value交付一个整数并返回true；段耗尽返回false。
 // 仅当当前块全部消费后才补块，nextOffset_始终是段内元素下标。
-bool InputBuffer::next(int32_t& value) {
-    if (pos_ == count_) {
+
+// 为什么同时使用 bool 和 value？
+// 因为它需要告诉调用者两件事：
+// 1. 是否成功取到了一个整数。
+// 2. 成功取到的整数是多少
+
+// int32_t x;
+// if (input.next(x)) 
+// {
+//     std::cout << x;
+// }
+bool InputBuffer::next(int32_t& value) 
+{
+    if (pos_ == count_) 
+    {
         count_ = file_.readBlock(runIndex_, nextOffset_, data_.data(), data_.size(), stats_);
         nextOffset_ += count_;
         pos_ = 0;
@@ -20,7 +34,8 @@ bool InputBuffer::next(int32_t& value) {
 }
 // 绑定当前待写段的文件，分配B个整数的输出块；beginRun由调用者负责。
 OutputBuffer::OutputBuffer(RunFile& file, size_t blockSize, IoStats* stats)
-    : file_(file), data_(blockSize), count_(0), stats_(stats) {
+    : file_(file), data_(blockSize), count_(0), stats_(stats) 
+{
     if (blockSize == 0) throw std::runtime_error("block size must be positive");
 }
 // 缓存一个整数；满块立即写入，减少逐元素文件调用。

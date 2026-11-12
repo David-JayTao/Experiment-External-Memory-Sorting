@@ -25,12 +25,26 @@ void BufferPool::initialization(RunFile& source, const std::vector<int>& runs, I
         finishPrefetch(static_cast<int>(lane), block);
     }
 }
+
+//动态预取策略
+//下一个空闲块应该拿去预取哪一路？
+// 1. 优先为已经没有缓冲数据、但磁盘上还有未读数据的路补块。
+// 2. 否则，在还没读完的路中，选择 lastKeys_ 最小的一路。
+// 3. 如果所有路都读取完，返回 -1。
+// 其中 lastKeys_[lane] 是该路最后一个已经读入的元素。
+
+// 因为每路有序，末尾已读值比较小的路，后续数据相对更有可能较早参与归并。
+
+///////////////////////////////////////////////////////////////////
 // 只考虑尚未读完的路；空队列优先，否则取lastKeys最小路，平局取先者。
 // 返回路号而非块号；返回-1表示所有数据已读入，不代表所有数据已输出。
-int BufferPool::choosePrefetch() const {
+int BufferPool::choosePrefetch() const 
+{
     int target = -1;
-    for (size_t lane = 0; lane < queues_.size(); ++lane) {
+    for (size_t lane = 0; lane < queues_.size(); ++lane) 
+    {
         if (next_[lane] == lengths_[lane]) continue;
+
         // 空队列先补足；正常预取取已读末值最小的一路。
         if (queues_[lane].empty()) return static_cast<int>(lane);
         if (target < 0 || lastKeys_[lane] < lastKeys_[target]) target = static_cast<int>(lane);
@@ -68,17 +82,24 @@ int32_t BufferPool::front(int lane) const {
     return input.values[input.pos];
 }
 // 计算线程消费一个值；块耗尽则出队并登记，暂不放回空闲池。
-void BufferPool::consume(int lane) {
+void BufferPool::consume(int lane) 
+{
     const int block = queues_[lane].front();
     InputBlock& input = blocks_[block];
-    if (++input.pos == input.count) {
+    if (++input.pos == input.count) 
+    {
         queues_[lane].pop();
         released_.push_back(block);
     }
 }
+
+
+
 // 主线程在join后归还耗尽块，使它们下一阶段可服务任意一路。
-void BufferPool::releaseConsumed() {
-    for (size_t index = 0; index < released_.size(); ++index) {
+void BufferPool::releaseConsumed() 
+{
+    for (size_t index = 0; index < released_.size(); ++index) 
+    {
         blocks_[released_[index]].pos = blocks_[released_[index]].count = 0;
         free_.push(released_[index]);
     }
@@ -99,30 +120,48 @@ void BufferPool::print(std::ostream& output) const {
     output << '\n';
 }
 
+
+
+
+
 // 合并这一组最多 k 个段，输出线程用 file，输入线程用独立 source 文件流。
 // 合并runs中的一组有序段，返回新增结果段号；ways限定最多路数。
 // 双输出块交替，输入池共享；独立读写文件流避免并发修改同一fstream。
 int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
-              size_t blockSize, IoStats& stats, std::ostream* trace) {
+              size_t blockSize, IoStats& stats, std::ostream* trace) 
+{
     if (runs.empty() || ways < 2 || runs.size() > ways || !blockSize)
         throw std::runtime_error("invalid k-way merge group");
     std::vector<RunInfo> infos;
     uint64_t total = 0;
-    for (size_t lane = 0; lane < runs.size(); ++lane) {
+    for (size_t lane = 0; lane < runs.size(); ++lane) 
+    {
         infos.push_back(file.run(runs[lane]));
         total += infos.back().count;
     }
-    RunFile source(file.path(), false);
+
+
+    //////////////////1、初始化缓冲池
+
+    RunFile source(file.path(), false);//独立只读文件流，输入线程使用。
+
     BufferPool pool(ways, blockSize, infos);
     pool.initialization(source, runs, stats);
+
     file.beginRun("K" + std::to_string(file.scan().size()));
+
+
     std::vector<int32_t> outputs[2];
     outputs[0].reserve(blockSize); outputs[1].reserve(blockSize);
     int activeOutput = 0;
     uint64_t emitted = 0;
     while (emitted < total || !outputs[1 - activeOutput].empty()) {
+
+        ////////////////2、选择预取路和物理块
         const int lane = pool.choosePrefetch();
         const int prefetchBlock = lane < 0 ? -1 : pool.reserve();
+
+
         const int writeOutput = 1 - activeOutput;
         outputs[activeOutput].clear();
         if (trace) {
@@ -130,6 +169,11 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
             *trace << "prefetch lane=" << lane << " block=" << prefetchBlock
                    << " computeOutput=" << activeOutput << " writeOutput=" << writeOutput << '\n';
         }
+
+
+
+        //////////////////3、收集每路头值，建立败者树
+
         // 每阶段从已公开队首重建k叶败者树；缺少未知头值时本阶段只补数据。
         std::vector<Candidate> heads(runs.size());
         bool missingHead = false;
@@ -156,6 +200,16 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
                 try {
                     if (missingHead) return; // 缺少一路的未知头值时，不能从其他路继续输出。
                     while (outputs[activeOutput].size() < blockSize && tree.winner() >= 0) {
+                        
+                        /////////////////////4、三线程并行执行
+
+                                // 这段就是完整的 K 路归并内核：
+                                // 1. 找到最小值来自哪一路。
+                                // 2. 将这个数加入输出块。
+                                // 3. 从获胜路消费一个数。
+                                // 4. 用该路的新头值替换败者树冠军。
+                                // 5. 重复直到输出块满、没有可用值，或者需要等待补块。
+                                                
                         const int winner = tree.winner();
                         outputs[activeOutput].push_back(tree.top().value);
                         ++emitted;
@@ -182,12 +236,22 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
             if (outputThread.joinable()) outputThread.join();
             throw;
         }
+
+
+
+        ////////////////////////////////5、阶段末尾同步
         // 三个任务结束才回收、公开预取块和切换输出；消除阶段间读写冲突。
         inputThread.join(); computeThread.join(); outputThread.join();
         for (int index = 0; index < 3; ++index) if (errors[index]) std::rethrow_exception(errors[index]);
+        
         ++stats.stages;
+
         pool.releaseConsumed();
+
         if (prefetchBlock >= 0) pool.finishPrefetch(lane, prefetchBlock);
+        /////////
+
+
         if (trace) *trace << "kway sync " << stats.stages << " emitted=" << emitted << '/' << total
                           << " produced=" << outputs[activeOutput].size() << " free=" << pool.freeCount() << '\n';
         outputs[writeOutput].clear();
@@ -197,11 +261,16 @@ int kWayMerge(RunFile& file, const std::vector<int>& runs, size_t ways,
     return file.endRun();
 }
 
+
+///////////kWayMerge() 只负责一次合并最多 K 个段。可是如果初始有 10 个段，k=3，一次不可能全部处理。
+
+
 // 一轮按组归并，每组是真正的 K 路选择；余下单段直接带入下一轮。
 // 反复按至多k段分组，返回唯一最终段；空输入返回-1。
 // 每轮段数缩为ceil(R/k)，余下单段直接携带，不执行额外数据复制。
 int mergeKRuns(RunFile& file, std::vector<int> runs, size_t ways,
-               size_t blockSize, IoStats& stats, std::ostream* trace) {
+               size_t blockSize, IoStats& stats, std::ostream* trace)
+{
     if (ways < 2 || !blockSize) throw std::runtime_error("k must be at least two");
     while (runs.size() > 1) {
         ++stats.rounds;

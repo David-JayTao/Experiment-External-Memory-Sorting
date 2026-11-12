@@ -12,7 +12,8 @@
 #include <direct.h>
 #endif
 // 严格解析非负整数，避免负数被转换成巨大的无符号容量。
-static size_t number(const char* text) {
+static size_t number(const char* text) 
+{
     if (!text[0]) throw std::runtime_error("empty numeric option");
     for (const char* digit = text; *digit; ++digit)
         if (*digit < '0' || *digit > '9') throw std::runtime_error("numeric option must contain digits only");
@@ -37,7 +38,8 @@ static void usage() {
 }
 // 解析模式和容量参数，调用演示、测试或 sortFile。
 // 正常退出返回0；参数、文件或验证错误统一报告并返回1。
-int main(int argc, char** argv) {
+int main(int argc, char** argv) 
+{
     try {
 #ifdef _WIN32
         // C/C++ 1.35 的 Ctrl+F5 复用终端时不更新 cwd/环境变量。
@@ -60,7 +62,7 @@ int main(int argc, char** argv) {
         }
         if (mode != "project1" && mode != "project2" && mode != "project3")
             throw std::runtime_error("unknown mode; run external_sort --help");
-        // M、B以整数个数计；默认15个数用于课堂逐步观察。
+        // M、B以整数个数计；默认15个数用于验收逐步观察。
         size_t memorySize = 4, blockSize = 3, ways = 3, count = 15;
         bool generatedSize = false, trace = false;
         std::string inputPath, outputPath = mode + "_runs.bin";

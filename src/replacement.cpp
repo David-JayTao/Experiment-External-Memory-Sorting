@@ -6,12 +6,14 @@
 #include <thread>
 
 // 每个输出元素携带段号：一个块跨越段边界时，输出线程仍能正确更新目录。
-struct GeneratedBlock {
+struct GeneratedBlock 
+{
     std::vector<int32_t> values;    // 当前块的有效输出，不超过 B 个
     std::vector<size_t> runNumbers; // 与 values 一一对应的生成段号
 };
 // 置换选择的单个物理输入块；两份交替承担计算输入和预取目标。
-struct ReplacementInput {
+struct ReplacementInput 
+{
     std::vector<int32_t> values;    // 固定 B 个整数的物理输入块
     size_t count = 0;              // 有效元素数量
     size_t pos = 0;                // 计算线程下一次消费的位置
@@ -20,11 +22,14 @@ struct ReplacementInput {
 // 跨段时先提交旧段再开启新段；runs记录已提交段，末段由主流程收尾。
 static void writeGeneratedBlock(const GeneratedBlock& block, RunFile& file,
                                 size_t& writtenRun, bool& runOpen,
-                                std::vector<int>& runs, IoStats& stats) {
+                                std::vector<int>& runs, IoStats& stats) 
+{
     size_t begin = 0;
-    while (begin < block.values.size()) {
+    while (begin < block.values.size()) 
+    {
         const size_t number = block.runNumbers[begin];
-        if (!runOpen || number != writtenRun) {
+        if (!runOpen || number != writtenRun) 
+        {
             if (runOpen) runs.push_back(file.endRun());
             file.beginRun("R" + std::to_string(number));
             writtenRun = number;
@@ -40,12 +45,14 @@ static void writeGeneratedBlock(const GeneratedBlock& block, RunFile& file,
 // 每阶段三个线程分别预取、选冠军、写上一块，join后才交接缓冲区。
 std::vector<int> replacementSelection(const std::string& rawPath, RunFile& file,
                                       size_t memorySize, size_t blockSize, IoStats& stats,
-                                      std::ostream* trace) {
+                                      std::ostream* trace) 
+{
     if (!memorySize || !blockSize) throw std::runtime_error("invalid replacement memory size");
     RawInput source(rawPath);
     ReplacementInput inputs[2];
     GeneratedBlock outputs[2];
-    for (int index = 0; index < 2; ++index) {
+    for (int index = 0; index < 2; ++index) 
+    {
         inputs[index].values.resize(blockSize);
         outputs[index].values.reserve(blockSize);
         outputs[index].runNumbers.reserve(blockSize);
@@ -75,8 +82,12 @@ std::vector<int> replacementSelection(const std::string& rawPath, RunFile& file,
     std::vector<int> runs;
     // 树空后还需把上一阶段生成的输出写完，不能立即退出。
     while (tree.winner() >= 0 || !outputs[1 - activeOutput].values.empty()) {
+
+
         const int spareInput = 1 - activeInput;
         const int writeOutput = 1 - activeOutput;
+
+    
         const bool readNeeded = inputs[spareInput].count == 0 && loaded < source.count();
         // 阶段内只读取这个快照；不会读取输入线程正在更新的 count。
         const bool noMoreAfterActive = loaded == source.count() && inputs[spareInput].count == 0;
@@ -113,8 +124,12 @@ std::vector<int> replacementSelection(const std::string& rawPath, RunFile& file,
                         if (input.pos < input.count) {
                             next.valid = true;
                             next.value = input.values[input.pos++];
+
+//冻结！//////////////////////////////////////////////////////////////////////////////////                            
                             // 新数小于刚输出值会破坏当前段非降序，因此留到下一段。
                             next.frozen = next.value < value;
+
+
                             if (trace && next.frozen) *trace << "freeze " << next.value << " < last=" << value << '\n';
                         }
                         tree.replaceWinner(next);

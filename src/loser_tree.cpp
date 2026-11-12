@@ -35,17 +35,27 @@ int LoserTree::build(int node) {
 int LoserTree::winner() const { return leaves_[champion_].valid ? champion_ : -1; }
 // 查看冠军候选；调用者先用winner判断是否仍有有效元素。
 const Candidate& LoserTree::top() const { return leaves_[champion_]; }
+
+
+
+
 // 用新候选替换当前冠军，仅沿该叶到根的路径重赛，时间O(log M)。
-void LoserTree::replaceWinner(const Candidate& candidate) {
+void LoserTree::replaceWinner(const Candidate& candidate) 
+{
     if (winner() < 0) throw std::runtime_error("cannot replace an empty tree winner");
     int challenger = champion_;
     leaves_[challenger] = candidate;
     // 原冠军沿途击败的对手恰好保存在这些节点，不需要重算其他子树。
-    for (int node = (leafCount_ + challenger) / 2; node > 0; node /= 2) {
+    for (int node = (leafCount_ + challenger) / 2; node > 0; node /= 2) 
+    {
         if (less(losers_[node], challenger)) std::swap(challenger, losers_[node]);
     }
     champion_ = challenger;
 }
+
+
+
+
 // 开始新段：清除冻结位并重建比赛；有效性不变，因此不会复活EOF叶。
 void LoserTree::thaw() {
     for (size_t index = 0; index < leaves_.size(); ++index) leaves_[index].frozen = false;

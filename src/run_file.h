@@ -6,7 +6,8 @@
 #include <vector>
 
 // 只计数据块的实际 read/write 调用；文件头、目录和验证读取不计入排序指标。
-struct IoStats {
+struct IoStats //读写统计
+{
     uint64_t readBlocks = 0; // 实际非空数据块读取调用次数
     uint64_t writeBlocks = 0; // 实际非空数据块写入调用次数
     uint64_t merges = 0; // 生成新段的归并操作次数
@@ -14,31 +15,41 @@ struct IoStats {
     uint64_t stages = 0; // 置换选择与K路归并的三线程同步阶段总数
 };
 // 固定32字节文件头，记录目录容量和数据起点；结构采用本机字节序。
-struct FileHeader {
-    char magic[8];                 // 文件标识 EMSORT1
-    uint32_t maxRuns;              // 固定目录容量
-    uint32_t runCount;             // 已提交的目录项数量
-    uint64_t directoryOffset;      // 字节偏移
-    uint64_t dataOffset; // 数据区首字节位置
+struct FileHeader //管整个文件
+{
+    char magic[8];                 // 文件标识 EMSORT1，用于检查是否为本项目的文件
+    uint32_t maxRuns;              // 固定目录容量，目录最多允许多少个归并段
+    uint32_t runCount;             // 已提交的目录项数量，已经写入多少个完整归并段
+    uint64_t directoryOffset;      // 目录区从文件第几个字节开始
+    uint64_t dataOffset;           // 数据区首字节位置，数据区从文件第几个字节开始
 };
-// 固定48字节目录项；用名称、字节偏移和元素数描述一个连续归并段。
-struct RunInfo {
-    char name[32];                 // 最多 31 字节，末尾为零
+
+// 固定48字节的一个归并段的目录项；用名称、字节偏移和元素数描述一个连续归并段。
+struct RunInfo //管理其中一个归并段
+{
+    char name[32];                 // 归并段名称，最多 31 字节，末尾为零
     uint64_t offset;               // 第一个 int32_t 的文件字节偏移
     uint64_t count;                // 元素数，不是字节数
 };
+
 static_assert(sizeof(FileHeader) == 32, "FileHeader layout must be 32 bytes");
 static_assert(sizeof(RunInfo) == 48, "RunInfo layout must be 48 bytes");
+//前 416 个字节用于文件头和目录，实际整数从第 416 字节偏移处开始
 
+//把内存里已有的内部排好序的归并段全部保存到磁盘，然后InputBuffer 读取这些 Run，
+//RunFile 就是专门负责把归并段 Run 存到磁盘上、管理起来、再读取出来的文件管理组件。
 // 顺序追加归并段；同一对象的文件流只允许一个线程访问。
-class RunFile {
+class RunFile 
+{
 public:
     // 创建文件并预留目录；已有同名文件会被截断。
     static void create(const std::string& path, uint32_t maxRuns);
     explicit RunFile(const std::string& path, bool writable = true);
     const FileHeader& header() const { return header_; }
-    // Scan直接返回内存目录；只含endRun已经提交的段。
+
+    // Scan直接返回所有内存目录项；只含endRun已经提交的段。
     const std::vector<RunInfo>& scan() const { return runs_; }
+
     int search(const std::string& name) const;
     const RunInfo& run(int index) const;
     // 开启一个待写段，随后可多次writeBlock，最后必须endRun提交。
@@ -63,7 +74,8 @@ private:
 };
 
 // 原始输入仅含连续 int32_t，没有 Header/Directory。
-class RawInput {
+class RawInput //原始输入文件的读取器
+{
 public:
     explicit RawInput(const std::string& path);
     uint64_t count() const { return count_; }

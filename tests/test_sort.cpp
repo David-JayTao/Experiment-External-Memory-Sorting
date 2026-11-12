@@ -135,8 +135,13 @@ static void testMechanisms() {
     require(rejected, "truncated header accepted");
     std::cout << "PASS loser replay/freeze/EOF, Huffman cost, empty K lanes, invalid files/ranges/names\n";
 }
+
+
+
+//////////////////////////////////////////////////////////////
 // 创建A/B/C不等长段，关闭后重开，展示物理偏移、Scan、Search及尾块输出。
-void week3Demo() {
+void week3Demo()
+ {
     RunFile::create("week3.bin", 8);
     {
         RunFile file("week3.bin");

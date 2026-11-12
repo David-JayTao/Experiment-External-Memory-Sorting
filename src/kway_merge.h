@@ -3,6 +3,7 @@
 #include "run_file.h"
 #include <queue>
 #include <ostream>
+
 // 共享池的一个物理块：整数数组及有效范围，不固定归属于某一路。
 struct InputBlock {
     std::vector<int32_t> values; // 固定B容量的数据区
